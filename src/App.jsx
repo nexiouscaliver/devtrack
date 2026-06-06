@@ -85,6 +85,13 @@ const ICONS = {
       <line x1="17.01" y1="12" x2="22.96" y2="12" />
     </>
   ),
+  gitCommit: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <line x1="12" y1="3" x2="12" y2="9" />
+      <line x1="12" y1="15" x2="12" y2="21" />
+    </>
+  ),
   chart: (
     <>
       <line x1="18" y1="20" x2="18" y2="10" />
@@ -381,10 +388,19 @@ export default function App() {
         duration: now - current.start,
         status: "completed",
       };
-      setData((d) => ({
-        ...d,
-        sessions: d.sessions.map((s) => (s.id === current.id ? ended : s)),
-      }));
+      setData((d) => {
+        // Find commits made during this session's time window
+        const sessionCommits = d.commits.filter(
+          (c) =>
+            c.timestamp >= current.start &&
+            c.timestamp <= now,
+        );
+        ended.commitIds = sessionCommits.map((c) => c.sha);
+        return {
+          ...d,
+          sessions: d.sessions.map((s) => (s.id === current.id ? ended : s)),
+        };
+      });
       setElapsed(0);
       showToast("Session completed ✓");
       return null;
@@ -424,12 +440,16 @@ export default function App() {
     showToast("Session deleted");
   };
 
-  const updateSession = (id, updates) => {
+  const updateSession = useCallback((id, updates) => {
     setData((d) => ({
       ...d,
       sessions: d.sessions.map((s) => (s.id === id ? { ...s, ...updates } : s)),
     }));
-  };
+    // Keep activeSession in sync so stopSession doesn't overwrite saved notes/tags
+    setActiveSession((prev) =>
+      prev && prev.id === id ? { ...prev, ...updates } : prev,
+    );
+  }, []);
 
   const updateSettings = (updates) => {
     setData((d) => ({ ...d, settings: { ...d.settings, ...updates } }));
@@ -945,6 +965,8 @@ function Dashboard({
                     </p>
                     <p className="text-xs text-stone-500">
                       {formatTime(s.start)} · {formatDuration(s.duration)}
+                      {s.commitIds?.length > 0 &&
+                        ` · ${s.commitIds.length} commit${s.commitIds.length > 1 ? "s" : ""}`}
                     </p>
                   </div>
                 </div>
@@ -1197,6 +1219,30 @@ function TimerView({
                   <div className="text-xs text-stone-500">
                     {formatTime(s.start)} - {formatTime(s.end)}
                   </div>
+                  {s.commitIds?.length > 0 && (
+                    <div className="mt-1 space-y-0.5">
+                      {s.commitIds.slice(0, 3).map((sha) => {
+                        const commit = data.commits.find(
+                          (c) => c.sha === sha,
+                        );
+                        if (!commit) return null;
+                        return (
+                          <div
+                            key={sha}
+                            className="flex items-center gap-1.5 text-xs text-stone-400"
+                          >
+                            <Icon path={ICONS.gitCommit} size={10} />
+                            <span className="truncate">{commit.message}</span>
+                          </div>
+                        );
+                      })}
+                      {s.commitIds.length > 3 && (
+                        <span className="text-xs text-stone-500">
+                          +{s.commitIds.length - 3} more commits
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="font-mono text-sm">
                   {formatDuration(s.duration)}
@@ -1350,6 +1396,35 @@ function SessionsView({ data, deleteSession, updateSession }) {
                               </span>
                             ))}
                           </div>
+                          {s.commitIds?.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {s.commitIds.map((sha) => {
+                                const commit = data.commits.find(
+                                  (c) => c.sha === sha,
+                                );
+                                if (!commit) return null;
+                                return (
+                                  <div
+                                    key={sha}
+                                    className="flex items-center gap-2 text-xs text-stone-400 bg-stone-800/40 rounded-lg px-2.5 py-1.5"
+                                  >
+                                    <Icon path={ICONS.gitCommit} size={12} />
+                                    <span className="font-mono text-stone-500">
+                                      {sha.slice(0, 7)}
+                                    </span>
+                                    <span className="truncate">
+                                      {commit.message}
+                                    </span>
+                                    {commit.repo && (
+                                      <span className="ml-auto text-stone-500 shrink-0">
+                                        {commit.repo}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
