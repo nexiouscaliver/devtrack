@@ -1372,7 +1372,11 @@ function SessionsView({ data, deleteSession, updateSession }) {
                       </button>
                     )}
                     <button
-                      onClick={() => deleteSession(s.id)}
+                      onClick={() => {
+                        if (confirm(`Delete this ${s.type} session (${formatDuration(s.duration)})?`)) {
+                          deleteSession(s.id);
+                        }
+                      }}
                       className="p-2 rounded-lg hover:bg-rose-500/20 text-slate-400 hover:text-rose-400"
                       aria-label="Delete session"
                     >
@@ -1543,7 +1547,18 @@ function GitView({ data, addCommit, setData, showToast }) {
       <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
         <h3 className="font-semibold mb-4">Commits ({data.commits.length})</h3>
         <div className="space-y-2 max-h-[500px] overflow-auto">
-          {data.commits.length === 0 ? (
+          {loading ? (
+            Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-xl animate-pulse">
+                <div className="w-8 h-8 rounded-full bg-slate-700 flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 bg-slate-700 rounded w-16" />
+                  <div className="h-4 bg-slate-700 rounded w-3/4" />
+                  <div className="h-3 bg-slate-700 rounded w-1/2" />
+                </div>
+              </div>
+            ))
+          ) : data.commits.length === 0 ? (
             <p className="text-slate-500 text-center py-8">
               No commits yet. Sync with GitHub or add manually.
             </p>
