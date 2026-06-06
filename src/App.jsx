@@ -2195,7 +2195,7 @@ function GitView({ data, addCommit, setData, showToast, gitEstimatedByRepo, gitE
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 text-sm">
                             <span className="text-stone-300">
-                              {formatTime(est.start)} – {formatTime(est.end)}
+                              {formatDate(est.start)} {formatTime(est.start)} – {formatTime(est.end)}
                             </span>
                             <span className={`text-[10px] px-1.5 py-0.5 rounded ${confidenceColor}`}>
                               {est.confidence}
