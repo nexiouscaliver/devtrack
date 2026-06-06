@@ -254,9 +254,8 @@ const DEFAULT_DATA = {
   commits: [],
   settings: {
     dailyGoal: 8,
-    githubToken: "",
-    githubUser: "",
     idleMinutes: 10,
+    trackedRepos: [],
   },
 };
 
@@ -274,6 +273,23 @@ const load = () => {
     ) {
       return null;
     }
+    // Migration: remove GitHub fields, add trackedRepos
+    if ("githubToken" in parsed.settings || "githubUser" in parsed.settings) {
+      delete parsed.settings.githubToken;
+      delete parsed.settings.githubUser;
+      if (!parsed.settings.trackedRepos) {
+        parsed.settings.trackedRepos = [];
+      }
+    }
+    if (!parsed.settings.trackedRepos) {
+      parsed.settings.trackedRepos = [];
+    }
+    // Tag old commits as manual source
+    parsed.commits = parsed.commits.map((c) => ({
+      ...c,
+      source: c.source || "manual",
+      repoPath: c.repoPath || "",
+    }));
     return parsed;
   } catch {
     return null;
@@ -515,24 +531,26 @@ export default function App() {
     { id: "dashboard", label: "Dashboard", icon: ICONS.dashboard },
     { id: "timer", label: "Timer", icon: ICONS.timer },
     { id: "sessions", label: "Sessions", icon: ICONS.list },
-    { id: "git", label: "Git Sync", icon: ICONS.github },
+    { id: "git", label: "Git Tracking", icon: ICONS.github },
     { id: "analytics", label: "Analytics", icon: ICONS.chart },
     { id: "export", label: "Export Report", icon: ICONS.download },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex">
+    <div className="min-h-screen bg-stone-950 text-stone-100 font-sans flex">
+      {/* Warm ambient gradient */}
+      <div className="fixed inset-0 pointer-events-none bg-gradient-to-br from-amber-950/20 via-transparent to-orange-950/10" />
       {/* Mobile header bar */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-40 bg-stone-900/95 backdrop-blur border-b border-stone-800 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
             <Icon path={ICONS.zap} size={16} className="text-white" />
           </div>
           <span className="font-bold">DevTrack</span>
         </div>
         <button
           onClick={() => setMobileMenuOpen(true)}
-          className="p-2 rounded-lg hover:bg-slate-800 text-slate-400"
+          className="p-2 rounded-lg hover:bg-stone-800 text-stone-400"
           aria-label="Open menu"
         >
           <Icon path={ICONS.menu} size={22} />
@@ -555,21 +573,21 @@ export default function App() {
               animate={{ x: 0 }}
               exit={{ x: -280 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 border-r border-slate-800 p-5 flex flex-col z-50 md:hidden"
+              className="fixed left-0 top-0 bottom-0 w-64 bg-stone-900 border-r border-stone-800 p-5 flex flex-col z-50 md:hidden"
             >
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/30">
                     <Icon path={ICONS.zap} size={20} className="text-white" />
                   </div>
                   <div>
                     <h1 className="font-bold text-lg leading-none">DevTrack</h1>
-                    <p className="text-xs text-slate-400">Smart Work Tracker</p>
+                    <p className="text-xs text-stone-400">Smart Work Tracker</p>
                   </div>
                 </div>
                 <button
                   onClick={() => setMobileMenuOpen(false)}
-                  className="p-2 rounded-lg hover:bg-slate-800 text-slate-400"
+                  className="p-2 rounded-lg hover:bg-stone-800 text-stone-400"
                   aria-label="Close menu"
                 >
                   <Icon path={ICONS.close} size={20} />
@@ -585,8 +603,8 @@ export default function App() {
                     }}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
                       view === item.id
-                        ? "bg-gradient-to-r from-indigo-500/20 to-purple-500/10 text-white border border-indigo-500/30"
-                        : "text-slate-400 hover:bg-slate-800/50 hover:text-white"
+                        ? "bg-gradient-to-r from-amber-500/20 to-orange-500/10 text-white border border-amber-500/30"
+                        : "text-stone-400 hover:bg-stone-800/50 hover:text-white"
                     }`}
                   >
                     <Icon path={item.icon} size={18} />
@@ -612,7 +630,7 @@ export default function App() {
                   setSettingsOpen(true);
                   setMobileMenuOpen(false);
                 }}
-                className="mt-4 flex items-center gap-2 px-3 py-2 text-sm text-slate-400 hover:text-white rounded-lg hover:bg-slate-800/50"
+                className="mt-4 flex items-center gap-2 px-3 py-2 text-sm text-stone-400 hover:text-white rounded-lg hover:bg-stone-800/50"
               >
                 <Icon path={ICONS.settings} size={16} />
                 Settings
@@ -623,14 +641,14 @@ export default function App() {
       </AnimatePresence>
 
       {/* Sidebar */}
-      <aside className="hidden md:flex w-64 bg-slate-900/50 backdrop-blur border-r border-slate-800 p-5 flex-col sticky top-0 h-screen">
+      <aside className="hidden md:flex w-64 bg-stone-900/50 backdrop-blur border-r border-stone-800 p-5 flex-col sticky top-0 h-screen">
         <div className="flex items-center gap-2 mb-8">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/30">
             <Icon path={ICONS.zap} size={20} className="text-white" />
           </div>
           <div>
             <h1 className="font-bold text-lg leading-none">DevTrack</h1>
-            <p className="text-xs text-slate-400">Smart Work Tracker</p>
+            <p className="text-xs text-stone-400">Smart Work Tracker</p>
           </div>
         </div>
 
@@ -641,8 +659,8 @@ export default function App() {
               onClick={() => setView(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
                 view === item.id
-                  ? "bg-gradient-to-r from-indigo-500/20 to-purple-500/10 text-white border border-indigo-500/30"
-                  : "text-slate-400 hover:bg-slate-800/50 hover:text-white"
+                  ? "bg-gradient-to-r from-amber-500/20 to-orange-500/10 text-white border border-amber-500/30"
+                  : "text-stone-400 hover:bg-stone-800/50 hover:text-white"
               }`}
             >
               <Icon path={item.icon} size={18} />
@@ -674,7 +692,7 @@ export default function App() {
 
         <button
           onClick={() => setSettingsOpen(true)}
-          className="mt-4 flex items-center gap-2 px-3 py-2 text-sm text-slate-400 hover:text-white rounded-lg hover:bg-slate-800/50"
+          className="mt-4 flex items-center gap-2 px-3 py-2 text-sm text-stone-400 hover:text-white rounded-lg hover:bg-stone-800/50"
         >
           <Icon path={ICONS.settings} size={16} />
           Settings
@@ -767,17 +785,17 @@ function Dashboard({
     return (
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col items-center justify-center py-24 text-center">
-          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 mb-6">
+          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/30 mb-6">
             <Icon path={ICONS.zap} size={36} className="text-white" />
           </div>
           <h1 className="text-3xl font-bold mb-3">Welcome to DevTrack</h1>
-          <p className="text-slate-400 max-w-md mb-8">
+          <p className="text-stone-400 max-w-md mb-8">
             Track your work sessions, analyze productivity patterns, and generate
             professional reports. Start your first session to get going.
           </p>
           <button
             onClick={() => startSession("work", [], "")}
-            className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 font-semibold text-lg shadow-lg shadow-indigo-500/30 flex items-center gap-3"
+            className="px-8 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 font-semibold text-lg shadow-lg shadow-amber-500/30 flex items-center gap-3"
           >
             <Icon path={ICONS.play} size={20} /> Start Your First Session
           </button>
@@ -789,9 +807,9 @@ function Dashboard({
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Hero */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-800 p-8 bg-gradient-to-br from-indigo-500/10 via-slate-950 to-purple-500/10">
+      <div className="relative overflow-hidden rounded-2xl border border-stone-800 p-8 bg-gradient-to-br from-amber-500/10 via-stone-950 to-orange-500/10">
         <div className="relative">
-          <p className="text-slate-400 text-sm mb-1">
+          <p className="text-stone-400 text-sm mb-1">
             {new Date().toLocaleDateString("en", {
               weekday: "long",
               month: "long",
@@ -799,9 +817,9 @@ function Dashboard({
             })}
           </p>
           <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
-            Welcome back <Icon path={ICONS.wave} size={28} className="text-indigo-400" />
+            Welcome back <Icon path={ICONS.wave} size={28} className="text-amber-400" />
           </h1>
-          <p className="text-slate-300 max-w-xl">
+          <p className="text-stone-300 max-w-xl">
             {activeSession
               ? `You're currently in a ${activeSession.type} session. Keep going!`
               : stats.sessionsToday === 0
@@ -812,13 +830,13 @@ function Dashboard({
             <div className="flex gap-3 mt-5">
               <button
                 onClick={() => startSession("work", [], "")}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 font-medium shadow-lg shadow-indigo-500/30 flex items-center gap-2 active:scale-[0.98] transition-transform"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 font-medium shadow-lg shadow-amber-500/30 flex items-center gap-2 active:scale-[0.98] transition-transform"
               >
                 <Icon path={ICONS.play} size={16} /> Start Work
               </button>
               <button
                 onClick={() => startSession("break", [], "")}
-                className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-medium flex items-center gap-2 active:scale-[0.98] transition-transform"
+                className="px-5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 font-medium flex items-center gap-2 active:scale-[0.98] transition-transform"
               >
                 <Icon path={ICONS.coffee} size={16} /> Take a Break
               </button>
@@ -834,7 +852,7 @@ function Dashboard({
           value={`${workedHrs}h`}
           sub={`of ${goal}h goal`}
           icon={ICONS.clock}
-          color="indigo"
+          color="amber"
           progress={stats.goalProgress}
         />
         <StatCard
@@ -849,7 +867,7 @@ function Dashboard({
           value={`${(stats.totalBreaks / 60000).toFixed(0)}m`}
           sub="today"
           icon={ICONS.coffee}
-          color="amber"
+          color="sky"
         />
         <StatCard
           label="Streak"
@@ -862,10 +880,10 @@ function Dashboard({
 
       {/* Charts + Activity */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="col-span-1 md:col-span-2 bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+        <div className="col-span-1 md:col-span-2 bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">This Week</h3>
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-stone-400">
               Work vs Breaks (hours)
             </span>
           </div>
@@ -873,35 +891,35 @@ function Dashboard({
             <AreaChart data={weeklyData}>
               <defs>
                 <linearGradient id="gWork" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#6366f1" stopOpacity={0.6} />
-                  <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="gBreak" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.6} />
                   <stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
                 </linearGradient>
+                <linearGradient id="gBreak" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.6} />
+                  <stop offset="100%" stopColor="#38bdf8" stopOpacity={0} />
+                </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-              <XAxis dataKey="day" stroke="#64748b" fontSize={12} />
-              <YAxis stroke="#64748b" fontSize={12} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#292524" />
+              <XAxis dataKey="day" stroke="#78716c" fontSize={12} />
+              <YAxis stroke="#78716c" fontSize={12} />
               <Tooltip
                 contentStyle={{
-                  background: "#0f172a",
-                  border: "1px solid #334155",
+                  background: "#1c1917",
+                  border: "1px solid #44403c",
                   borderRadius: 8,
                 }}
               />
               <Area
                 type="monotone"
                 dataKey="work"
-                stroke="#6366f1"
+                stroke="#f59e0b"
                 fill="url(#gWork)"
                 strokeWidth={2}
               />
               <Area
                 type="monotone"
                 dataKey="breaks"
-                stroke="#f59e0b"
+                stroke="#38bdf8"
                 fill="url(#gBreak)"
                 strokeWidth={2}
               />
@@ -909,7 +927,7 @@ function Dashboard({
           </ResponsiveContainer>
         </div>
 
-        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+        <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
           <h3 className="font-semibold mb-4">Recent Activity</h3>
           <div className="space-y-3 max-h-[240px] overflow-auto">
             {data.sessions
@@ -919,13 +937,13 @@ function Dashboard({
               .map((s) => (
                 <div key={s.id} className="flex items-start gap-3 text-sm">
                   <div
-                    className={`w-2 h-2 rounded-full mt-1.5 ${s.type === "work" ? "bg-indigo-400" : "bg-amber-400"}`}
+                    className={`w-2 h-2 rounded-full mt-1.5 ${s.type === "work" ? "bg-amber-400" : "bg-sky-400"}`}
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="truncate text-slate-200">
+                    <p className="truncate text-stone-200">
                       {s.notes || s.tags?.[0] || s.type}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-stone-500">
                       {formatTime(s.start)} · {formatDuration(s.duration)}
                     </p>
                   </div>
@@ -940,12 +958,11 @@ function Dashboard({
 
 function StatCard({ label, value, sub, icon, color, progress }) {
   const colors = {
-    indigo:
-      "from-indigo-500/20 to-indigo-500/5 border-indigo-500/30 text-indigo-400",
-    emerald:
-      "from-emerald-500/20 to-emerald-500/5 border-emerald-500/30 text-emerald-400",
     amber:
       "from-amber-500/20 to-amber-500/5 border-amber-500/30 text-amber-400",
+    emerald:
+      "from-emerald-500/20 to-emerald-500/5 border-emerald-500/30 text-emerald-400",
+    sky: "from-sky-500/20 to-sky-500/5 border-sky-500/30 text-sky-400",
     rose: "from-rose-500/20 to-rose-500/5 border-rose-500/30 text-rose-400",
   };
   return (
@@ -954,19 +971,19 @@ function StatCard({ label, value, sub, icon, color, progress }) {
     >
       <div className="flex items-center justify-between mb-3">
         <Icon path={icon} size={18} />
-        <span className="text-xs text-slate-400 uppercase tracking-wide">
+        <span className="text-xs text-stone-400 uppercase tracking-wide">
           {label}
         </span>
       </div>
       <div className="text-3xl font-bold text-white">{value}</div>
-      <div className="text-xs text-slate-400 mt-1">{sub}</div>
+      <div className="text-xs text-stone-400 mt-1">{sub}</div>
       {typeof progress === "number" && (
-        <div className="mt-3 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+        <div className="mt-3 h-1.5 bg-stone-800 rounded-full overflow-hidden">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
             transition={{ duration: 1 }}
-            className="h-full bg-gradient-to-r from-indigo-500 to-purple-500"
+            className="h-full bg-gradient-to-r from-amber-500 to-orange-500"
           />
         </div>
       )}
@@ -1025,13 +1042,13 @@ function TimerView({
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
         <h2 className="text-2xl font-bold">Focus Timer</h2>
-        <p className="text-slate-400">Track your work with precision</p>
+        <p className="text-stone-400">Track your work with precision</p>
       </div>
 
-      <div className="bg-gradient-to-br from-slate-900 to-slate-900/50 border border-slate-800 rounded-2xl p-10 text-center">
+      <div className="bg-gradient-to-br from-stone-900 to-stone-900/50 border border-stone-800 rounded-2xl p-10 text-center">
         {/* Timer display */}
         <div className="relative inline-block mb-6">
-          <div className="w-48 h-48 sm:w-56 sm:h-56 md:w-64 md:h-64 rounded-full border-4 border-slate-800 flex items-center justify-center relative">
+          <div className="w-48 h-48 sm:w-56 sm:h-56 md:w-64 md:h-64 rounded-full border-4 border-stone-800 flex items-center justify-center relative">
             {activeSession && (
               <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 256 256">
                 {/* Background track */}
@@ -1040,7 +1057,7 @@ function TimerView({
                   cy="128"
                   r="124"
                   fill="none"
-                  stroke="#1e293b"
+                  stroke="#292524"
                   strokeWidth="4"
                 />
                 {/* Goal progress arc */}
@@ -1056,8 +1073,8 @@ function TimerView({
                 />
                 <defs>
                   <linearGradient id="timerGrad">
-                    <stop offset="0%" stopColor="#6366f1" />
-                    <stop offset="100%" stopColor="#a855f7" />
+                    <stop offset="0%" stopColor="#f59e0b" />
+                    <stop offset="100%" stopColor="#f97316" />
                   </linearGradient>
                 </defs>
               </svg>
@@ -1066,7 +1083,7 @@ function TimerView({
               <div className="font-mono text-4xl sm:text-5xl font-bold">
                 {formatDuration(activeSession ? elapsed : 0)}
               </div>
-              <div className="text-xs uppercase tracking-widest text-slate-400 mt-2">
+              <div className="text-xs uppercase tracking-widest text-stone-400 mt-2">
                 {activeSession ? activeSession.type : "Ready"}
               </div>
             </div>
@@ -1076,16 +1093,16 @@ function TimerView({
         {/* Controls */}
         {!activeSession ? (
           <div className="space-y-4 max-w-md mx-auto">
-            <div className="flex gap-2 bg-slate-800/50 p-1 rounded-xl">
+            <div className="flex gap-2 bg-stone-800/50 p-1 rounded-xl">
               <button
                 onClick={() => setType("work")}
-                className={`flex-1 py-2 rounded-lg font-medium text-sm flex items-center justify-center gap-2 ${type === "work" ? "bg-indigo-500 text-white" : "text-slate-400"}`}
+                className={`flex-1 py-2 rounded-lg font-medium text-sm flex items-center justify-center gap-2 ${type === "work" ? "bg-amber-500 text-white" : "text-stone-400"}`}
               >
                 <Icon path={ICONS.briefcase} size={14} /> Work
               </button>
               <button
                 onClick={() => setType("break")}
-                className={`flex-1 py-2 rounded-lg font-medium text-sm flex items-center justify-center gap-2 ${type === "break" ? "bg-amber-500 text-white" : "text-slate-400"}`}
+                className={`flex-1 py-2 rounded-lg font-medium text-sm flex items-center justify-center gap-2 ${type === "break" ? "bg-sky-500 text-white" : "text-stone-400"}`}
               >
                 <Icon path={ICONS.coffee} size={14} /> Break
               </button>
@@ -1094,18 +1111,18 @@ function TimerView({
               value={tags}
               onChange={(e) => setTags(e.target.value)}
               placeholder="Tags (comma separated)"
-              className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm focus:outline-none focus:border-indigo-500"
+              className="w-full px-4 py-2.5 bg-stone-800 border border-stone-700 rounded-xl text-sm focus:outline-none focus:border-amber-500"
             />
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="What are you working on?"
               rows={2}
-              className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm focus:outline-none focus:border-indigo-500 resize-none"
+              className="w-full px-4 py-2.5 bg-stone-800 border border-stone-700 rounded-xl text-sm focus:outline-none focus:border-amber-500 resize-none"
             />
             <button
               onClick={handleStart}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/30 active:scale-[0.98] transition-transform"
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 font-semibold flex items-center justify-center gap-2 shadow-lg shadow-amber-500/30 active:scale-[0.98] transition-transform"
             >
               <Icon path={ICONS.play} size={18} /> Start Session
             </button>
@@ -1116,14 +1133,14 @@ function TimerView({
               value={tags}
               onChange={(e) => setTags(e.target.value)}
               placeholder="Tags"
-              className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm focus:outline-none focus:border-indigo-500"
+              className="w-full px-4 py-2.5 bg-stone-800 border border-stone-700 rounded-xl text-sm focus:outline-none focus:border-amber-500"
             />
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Notes..."
               rows={2}
-              className="w-full px-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm focus:outline-none focus:border-indigo-500 resize-none"
+              className="w-full px-4 py-2.5 bg-stone-800 border border-stone-700 rounded-xl text-sm focus:outline-none focus:border-amber-500 resize-none"
             />
             <div className="flex gap-2">
               <button
@@ -1134,12 +1151,12 @@ function TimerView({
               </button>
               <button
                 onClick={saveSessionNotes}
-                className="px-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 font-semibold flex items-center justify-center gap-2"
+                className="px-5 py-3 rounded-xl bg-stone-800 hover:bg-stone-700 font-semibold flex items-center justify-center gap-2"
               >
                 <Icon path={ICONS.check} size={18} /> Save Notes
               </button>
             </div>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-stone-400">
               Started at {formatTime(activeSession.start)}
             </p>
           </div>
@@ -1147,10 +1164,10 @@ function TimerView({
       </div>
 
       {/* Today's sessions */}
-      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+      <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
         <h3 className="font-semibold mb-4">Today's Sessions</h3>
         {todaySessions.length === 0 ? (
-          <p className="text-slate-500 text-sm text-center py-6">
+          <p className="text-stone-500 text-sm text-center py-6">
             No completed sessions yet
           </p>
         ) : (
@@ -1158,10 +1175,10 @@ function TimerView({
             {todaySessions.map((s) => (
               <div
                 key={s.id}
-                className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-xl"
+                className="flex items-center gap-3 p-3 bg-stone-800/50 rounded-xl"
               >
                 <div
-                  className={`w-2 h-8 rounded ${s.type === "work" ? "bg-indigo-400" : "bg-amber-400"}`}
+                  className={`w-2 h-8 rounded ${s.type === "work" ? "bg-amber-400" : "bg-sky-400"}`}
                 />
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
@@ -1171,13 +1188,13 @@ function TimerView({
                     {s.tags?.map((t) => (
                       <span
                         key={t}
-                        className="text-xs px-2 py-0.5 bg-slate-700 rounded-full text-slate-300"
+                        className="text-xs px-2 py-0.5 bg-stone-700 rounded-full text-stone-300"
                       >
                         {t}
                       </span>
                     ))}
                   </div>
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-stone-500">
                     {formatTime(s.start)} - {formatTime(s.end)}
                   </div>
                 </div>
@@ -1226,7 +1243,7 @@ function SessionsView({ data, deleteSession, updateSession }) {
     <div className="max-w-5xl mx-auto space-y-6">
       <div>
         <h2 className="text-2xl font-bold">Session History</h2>
-        <p className="text-slate-400">All your tracked time</p>
+        <p className="text-stone-400">All your tracked time</p>
       </div>
 
       <div className="flex gap-3 items-center">
@@ -1234,14 +1251,14 @@ function SessionsView({ data, deleteSession, updateSession }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search sessions..."
-          className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm focus:outline-none focus:border-indigo-500"
+          className="flex-1 px-4 py-2.5 bg-stone-900 border border-stone-800 rounded-xl text-sm focus:outline-none focus:border-amber-500"
         />
-        <div className="flex gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl">
+        <div className="flex gap-1 bg-stone-900 border border-stone-800 p-1 rounded-xl">
           {["all", "work", "break"].map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-4 py-1.5 rounded-lg text-sm capitalize ${filter === f ? "bg-indigo-500 text-white" : "text-slate-400"}`}
+              className={`px-4 py-1.5 rounded-lg text-sm capitalize ${filter === f ? "bg-amber-500 text-white" : "text-stone-400"}`}
             >
               {f}
             </button>
@@ -1252,13 +1269,13 @@ function SessionsView({ data, deleteSession, updateSession }) {
       <div className="space-y-6">
         {Object.keys(grouped).length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <Icon path={ICONS.list} size={40} className="text-slate-600 mb-4" />
-            <h3 className="text-xl font-semibold text-slate-300 mb-2">
+            <Icon path={ICONS.list} size={40} className="text-stone-600 mb-4" />
+            <h3 className="text-xl font-semibold text-stone-300 mb-2">
               {data.sessions.length === 0
                 ? "No sessions yet"
                 : "No matching sessions"}
             </h3>
-            <p className="text-slate-500 max-w-sm">
+            <p className="text-stone-500 max-w-sm">
               {data.sessions.length === 0
                 ? "Start your first work session from the Timer or Dashboard to begin tracking your time."
                 : "Try adjusting your search or filter to find what you're looking for."}
@@ -1275,10 +1292,10 @@ function SessionsView({ data, deleteSession, updateSession }) {
                 <h3 className="font-semibold">
                   {date}{" "}
                   {isToday(sessions[0].start) && (
-                    <span className="text-xs text-indigo-400 ml-2">Today</span>
+                    <span className="text-xs text-amber-400 ml-2">Today</span>
                   )}
                 </h3>
-                <span className="text-sm text-slate-400">
+                <span className="text-sm text-stone-400">
                   {(dayWork / 3600000).toFixed(1)}h work
                 </span>
               </div>
@@ -1287,10 +1304,10 @@ function SessionsView({ data, deleteSession, updateSession }) {
                   <motion.div
                     key={s.id}
                     layout
-                    className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex items-center gap-4 hover:bg-slate-800/40 hover:border-slate-700 transition-colors"
+                    className="bg-stone-900/50 border border-stone-800 rounded-xl p-4 flex items-center gap-4 hover:bg-stone-800/40 hover:border-stone-700 transition-colors"
                   >
                     <div
-                      className={`w-1 self-stretch rounded ${s.type === "work" ? "bg-indigo-400" : "bg-amber-400"}`}
+                      className={`w-1 self-stretch rounded ${s.type === "work" ? "bg-amber-400" : "bg-sky-400"}`}
                     />
                     <div className="flex-1">
                       {editingId === s.id ? (
@@ -1303,7 +1320,7 @@ function SessionsView({ data, deleteSession, updateSession }) {
                                 notes: e.target.value,
                               })
                             }
-                            className="w-full px-3 py-1.5 bg-slate-800 rounded text-sm"
+                            className="w-full px-3 py-1.5 bg-stone-800 rounded text-sm"
                             placeholder="Notes"
                           />
                           <input
@@ -1311,7 +1328,7 @@ function SessionsView({ data, deleteSession, updateSession }) {
                             onChange={(e) =>
                               setEditData({ ...editData, tags: e.target.value })
                             }
-                            className="w-full px-3 py-1.5 bg-slate-800 rounded text-sm"
+                            className="w-full px-3 py-1.5 bg-stone-800 rounded text-sm"
                             placeholder="Tags"
                           />
                         </div>
@@ -1321,13 +1338,13 @@ function SessionsView({ data, deleteSession, updateSession }) {
                             {s.notes || "Untitled session"}
                           </p>
                           <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-slate-400">
+                            <span className="text-xs text-stone-400">
                               {formatTime(s.start)} - {formatTime(s.end)}
                             </span>
                             {s.tags?.map((t) => (
                               <span
                                 key={t}
-                                className="text-xs px-2 py-0.5 bg-slate-800 rounded-full text-slate-300"
+                                className="text-xs px-2 py-0.5 bg-stone-800 rounded-full text-stone-300"
                               >
                                 {t}
                               </span>
@@ -1336,7 +1353,7 @@ function SessionsView({ data, deleteSession, updateSession }) {
                         </>
                       )}
                     </div>
-                    <div className="font-mono text-sm text-slate-300">
+                    <div className="font-mono text-sm text-stone-300">
                       {formatDuration(s.duration)}
                     </div>
                     {editingId === s.id ? (
@@ -1365,7 +1382,7 @@ function SessionsView({ data, deleteSession, updateSession }) {
                             tags: s.tags?.join(", "),
                           });
                         }}
-                        className="p-2 rounded-lg hover:bg-slate-800 text-slate-400"
+                        className="p-2 rounded-lg hover:bg-stone-800 text-stone-400"
                         aria-label="Edit session"
                       >
                         <Icon path={ICONS.edit} size={16} />
@@ -1377,7 +1394,7 @@ function SessionsView({ data, deleteSession, updateSession }) {
                           deleteSession(s.id);
                         }
                       }}
-                      className="p-2 rounded-lg hover:bg-rose-500/20 text-slate-400 hover:text-rose-400"
+                      className="p-2 rounded-lg hover:bg-rose-500/20 text-stone-400 hover:text-rose-400"
                       aria-label="Delete session"
                     >
                       <Icon path={ICONS.trash} size={16} />
@@ -1395,53 +1412,145 @@ function SessionsView({ data, deleteSession, updateSession }) {
 
 // ============ GIT VIEW ============
 function GitView({ data, addCommit, setData, showToast }) {
-  const [username, setUsername] = useState(data.settings.githubUser || "");
-  const [token, setToken] = useState(data.settings.githubToken || "");
-  const [loading, setLoading] = useState(false);
+  const [repoPath, setRepoPath] = useState("");
+  const [validating, setValidating] = useState(false);
+  const [repoError, setRepoError] = useState("");
+  const [syncingRepoId, setSyncingRepoId] = useState(null);
+  const [serverStatus, setServerStatus] = useState(null); // "online" | "offline" | "no-git"
+  const [repoFilter, setRepoFilter] = useState("all");
   const [manualCommit, setManualCommit] = useState({
     sha: "",
     message: "",
     repo: "",
   });
 
-  const fetchCommits = async () => {
-    if (!username) {
-      showToast("Enter GitHub username", "error");
+  const trackedRepos = data.settings.trackedRepos || [];
+
+  // Check server health on mount
+  useEffect(() => {
+    fetch("/api/git/health")
+      .then((r) => r.json())
+      .then((d) => setServerStatus(d.git ? "online" : "no-git"))
+      .catch(() => setServerStatus("offline"));
+  }, []);
+
+  const validateRepo = async () => {
+    const trimmed = repoPath.trim();
+    if (!trimmed) {
+      setRepoError("Enter a folder path");
       return;
     }
-    setLoading(true);
+    setValidating(true);
+    setRepoError("");
     try {
-      const headers = token ? { Authorization: `token ${token}` } : {};
-      const res = await fetch(
-        `https://api.github.com/users/${username}/events`,
-        { headers },
-      );
-      if (res.status === 401) throw new Error("Invalid GitHub token — check your settings");
-      if (res.status === 403) throw new Error("API rate limited — try again later or add a personal access token");
-      if (res.status === 404) throw new Error("GitHub user not found — check the username");
-      if (!res.ok) throw new Error(`GitHub API error (${res.status})`);
-      const events = await res.json();
-      const commits = events
-        .filter((e) => e.type === "PushEvent")
-        .flatMap((e) =>
-          (e.payload.commits || []).map((c) => ({
-            sha: c.sha.substring(0, 7),
-            message: c.message.split("\n")[0],
-            repo: e.repo.name,
-            timestamp: new Date(e.created_at).getTime(),
-          })),
-        )
-        .slice(0, 50);
+      const res = await fetch("/api/git/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: trimmed }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        setRepoError(result.error || "Validation failed");
+        return;
+      }
+      if (!result.valid) {
+        setRepoError(result.error || "Invalid path");
+        return;
+      }
+      if (!result.isRepo) {
+        setRepoError("Not a git repository");
+        return;
+      }
+      // Check if already tracked
+      if (trackedRepos.some((r) => r.path === trimmed)) {
+        setRepoError("This repository is already tracked");
+        return;
+      }
+      const repo = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+        path: trimmed,
+        name: result.name,
+        branch: result.branch,
+        lastSync: null,
+      };
       setData((d) => ({
         ...d,
-        commits,
-        settings: { ...d.settings, githubUser: username, githubToken: token },
+        settings: {
+          ...d.settings,
+          trackedRepos: [...(d.settings.trackedRepos || []), repo],
+        },
       }));
-      showToast(`Fetched ${commits.length} commits`);
-    } catch (err) {
-      showToast(err.message || "Failed to fetch commits. Check your connection.", "error");
+      setRepoPath("");
+      showToast(`Tracking "${repo.name}" on ${repo.branch}`);
+    } catch {
+      setServerStatus("offline");
+      setRepoError("Cannot reach git server");
     }
-    setLoading(false);
+    setValidating(false);
+  };
+
+  const syncRepo = async (repo) => {
+    setSyncingRepoId(repo.id);
+    try {
+      const res = await fetch("/api/git/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: repo.path, count: 200 }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to fetch git log");
+      }
+      const result = await res.json();
+      // Merge: replace old commits from this repo path, add new ones
+      setData((d) => {
+        const others = d.commits.filter(
+          (c) => c.source !== "local" || c.repoPath !== repo.path,
+        );
+        const newCommits = result.commits.map((c) => ({
+          ...c,
+          source: "local",
+        }));
+        return {
+          ...d,
+          commits: [...newCommits, ...others],
+          settings: {
+            ...d.settings,
+            trackedRepos: (d.settings.trackedRepos || []).map((r) =>
+              r.id === repo.id ? { ...r, lastSync: Date.now() } : r,
+            ),
+          },
+        };
+      });
+      showToast(`Synced ${result.commits.length} commits from ${repo.name}`);
+    } catch (err) {
+      showToast(err.message || "Sync failed", "error");
+    }
+    setSyncingRepoId(null);
+  };
+
+  const syncAll = async () => {
+    for (const repo of trackedRepos) {
+      await syncRepo(repo);
+    }
+  };
+
+  const removeRepo = (repoId) => {
+    const repo = trackedRepos.find((r) => r.id === repoId);
+    if (!repo) return;
+    setData((d) => ({
+      ...d,
+      commits: d.commits.filter(
+        (c) => c.source !== "local" || c.repoPath !== repo.path,
+      ),
+      settings: {
+        ...d.settings,
+        trackedRepos: (d.settings.trackedRepos || []).filter(
+          (r) => r.id !== repoId,
+        ),
+      },
+    }));
+    showToast(`Removed "${repo.name}"`);
   };
 
   const addManual = () => {
@@ -1452,138 +1561,284 @@ function GitView({ data, addCommit, setData, showToast }) {
       message: manualCommit.message,
       repo: manualCommit.repo || "manual",
       timestamp: Date.now(),
+      source: "manual",
+      repoPath: "",
     });
     setManualCommit({ sha: "", message: "", repo: "" });
     showToast("Commit added");
   };
 
+  // Filter commits by selected repo
+  const filteredCommits =
+    repoFilter === "all"
+      ? data.commits
+      : data.commits.filter((c) => c.repo === repoFilter);
+
+  // Unique repo names for filter dropdown
+  const repoNames = [
+    ...new Set(data.commits.map((c) => c.repo).filter(Boolean)),
+  ];
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div>
-        <h2 className="text-2xl font-bold">Git Integration</h2>
-        <p className="text-slate-400">Sync your GitHub commits automatically</p>
+        <h2 className="text-2xl font-bold">Git Tracking</h2>
+        <p className="text-stone-400">
+          Track commits from your local git repositories
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <Icon path={ICONS.github} size={18} /> GitHub Sync
-          </h3>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-slate-400">GitHub Username</label>
-              <input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full mt-1 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-slate-400">
-                Personal Access Token (optional)
-              </label>
-              <input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="ghp_..."
-                className="w-full mt-1 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
-              />
-            </div>
+      {/* Server status banner */}
+      {serverStatus === "offline" && (
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 text-sm text-rose-300">
+          Git server is not running. Start it with{" "}
+          <code className="bg-rose-500/20 px-1.5 py-0.5 rounded text-xs">
+            npm run dev:server
+          </code>{" "}
+          or use <code className="bg-rose-500/20 px-1.5 py-0.5 rounded text-xs">npm run dev</code> to start both.
+        </div>
+      )}
+      {serverStatus === "no-git" && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-sm text-amber-300">
+          git is not installed or not on PATH. Install git to use local
+          tracking.
+        </div>
+      )}
+
+      {/* Add repo panel */}
+      <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
+        <h3 className="font-semibold mb-4 flex items-center gap-2">
+          <Icon path={ICONS.plus} size={18} /> Add Repository
+        </h3>
+        <div className="flex gap-3">
+          <input
+            value={repoPath}
+            onChange={(e) => {
+              setRepoPath(e.target.value);
+              setRepoError("");
+            }}
+            onKeyDown={(e) => e.key === "Enter" && validateRepo()}
+            placeholder="/path/to/your/project"
+            className="flex-1 px-4 py-2.5 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500 font-mono"
+          />
+          <button
+            onClick={validateRepo}
+            disabled={validating || serverStatus === "offline"}
+            className="px-6 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 font-medium flex items-center gap-2 whitespace-nowrap"
+          >
+            {validating ? "Checking..." : "Validate & Add"}
+          </button>
+        </div>
+        {repoError && (
+          <p className="text-xs text-rose-400 mt-2">{repoError}</p>
+        )}
+      </div>
+
+      {/* Tracked repos list */}
+      {trackedRepos.length > 0 && (
+        <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold">
+              Tracked Repositories ({trackedRepos.length})
+            </h3>
             <button
-              onClick={fetchCommits}
-              disabled={loading}
-              className="w-full py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 font-medium flex items-center justify-center gap-2"
+              onClick={syncAll}
+              disabled={syncingRepoId !== null}
+              className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-sm font-medium flex items-center gap-2"
             >
               <Icon
                 path={ICONS.refresh}
-                size={16}
-                className={loading ? "animate-spin" : ""}
+                size={14}
+                className={syncingRepoId !== null ? "animate-spin" : ""}
               />
-              {loading ? "Fetching..." : "Sync Commits"}
+              Sync All
             </button>
           </div>
-        </div>
-
-        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <Icon path={ICONS.plus} size={18} /> Manual Commit
-          </h3>
           <div className="space-y-3">
-            <input
-              value={manualCommit.repo}
-              onChange={(e) =>
-                setManualCommit({ ...manualCommit, repo: e.target.value })
-              }
-              placeholder="Repository"
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
-            />
-            <input
-              value={manualCommit.message}
-              onChange={(e) =>
-                setManualCommit({ ...manualCommit, message: e.target.value })
-              }
-              placeholder="Commit message"
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
-            />
+            {trackedRepos.map((repo) => (
+              <div
+                key={repo.id}
+                className="flex items-center gap-4 p-4 bg-stone-800/50 rounded-xl"
+              >
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center flex-shrink-0">
+                  <Icon path={ICONS.git} size={18} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{repo.name}</p>
+                  <p className="text-xs text-stone-500 font-mono truncate">
+                    {repo.path}
+                  </p>
+                  <div className="flex items-center gap-3 mt-1">
+                    <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                      {repo.branch}
+                    </span>
+                    {repo.lastSync && (
+                      <span className="text-xs text-stone-500">
+                        Last sync: {formatDate(repo.lastSync)}{" "}
+                        {formatTime(repo.lastSync)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => syncRepo(repo)}
+                  disabled={syncingRepoId !== null}
+                  className="p-2 rounded-lg hover:bg-stone-700 text-stone-400 hover:text-white disabled:opacity-50"
+                  aria-label={`Sync ${repo.name}`}
+                >
+                  <Icon
+                    path={ICONS.refresh}
+                    size={16}
+                    className={
+                      syncingRepoId === repo.id ? "animate-spin" : ""
+                    }
+                  />
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm(`Remove "${repo.name}" from tracking?`)) {
+                      removeRepo(repo.id);
+                    }
+                  }}
+                  className="p-2 rounded-lg hover:bg-rose-500/20 text-stone-400 hover:text-rose-400"
+                  aria-label={`Remove ${repo.name}`}
+                >
+                  <Icon path={ICONS.trash} size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Manual commit entry */}
+      <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
+        <h3 className="font-semibold mb-4 flex items-center gap-2">
+          <Icon path={ICONS.plus} size={18} /> Manual Commit
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <input
+            value={manualCommit.repo}
+            onChange={(e) =>
+              setManualCommit({ ...manualCommit, repo: e.target.value })
+            }
+            placeholder="Repository"
+            className="px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
+          />
+          <input
+            value={manualCommit.message}
+            onChange={(e) =>
+              setManualCommit({ ...manualCommit, message: e.target.value })
+            }
+            placeholder="Commit message"
+            className="md:col-span-2 px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
+          />
+          <div className="flex gap-2">
             <input
               value={manualCommit.sha}
               onChange={(e) =>
                 setManualCommit({ ...manualCommit, sha: e.target.value })
               }
-              placeholder="SHA (optional)"
-              className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
+              placeholder="SHA"
+              className="flex-1 px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
             />
             <button
               onClick={addManual}
-              className="w-full py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 font-medium"
+              className="px-4 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 font-medium whitespace-nowrap"
             >
-              Add Commit
+              Add
             </button>
           </div>
         </div>
       </div>
 
-      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
-        <h3 className="font-semibold mb-4">Commits ({data.commits.length})</h3>
+      {/* Commits list */}
+      <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold">
+            Commits ({filteredCommits.length})
+          </h3>
+          {repoNames.length > 1 && (
+            <select
+              value={repoFilter}
+              onChange={(e) => setRepoFilter(e.target.value)}
+              className="px-3 py-1.5 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
+            >
+              <option value="all">All repos</option>
+              {repoNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
         <div className="space-y-2 max-h-[500px] overflow-auto">
-          {loading ? (
-            Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-xl animate-pulse">
-                <div className="w-8 h-8 rounded-full bg-slate-700 flex-shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-3 bg-slate-700 rounded w-16" />
-                  <div className="h-4 bg-slate-700 rounded w-3/4" />
-                  <div className="h-3 bg-slate-700 rounded w-1/2" />
-                </div>
+          {syncingRepoId !== null &&
+            filteredCommits.length === 0 && (
+              <div className="flex items-center justify-center py-8 gap-2 text-stone-400">
+                <Icon
+                  path={ICONS.refresh}
+                  size={16}
+                  className="animate-spin"
+                />
+                Syncing...
               </div>
-            ))
-          ) : data.commits.length === 0 ? (
-            <p className="text-slate-500 text-center py-8">
-              No commits yet. Sync with GitHub or add manually.
+            )}
+          {filteredCommits.length === 0 && syncingRepoId === null && (
+            <p className="text-stone-500 text-center py-8">
+              No commits yet. Add a repository above or enter commits manually.
             </p>
-          ) : (
-            data.commits.map((c, i) => (
-              <div
-                key={i}
-                className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-xl"
-              >
-                <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Icon path={ICONS.code} size={14} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-mono text-xs text-emerald-400 mb-0.5">
+          )}
+          {filteredCommits.map((c, i) => (
+            <div
+              key={`${c.sha}-${i}`}
+              className="flex items-start gap-3 p-3 bg-stone-800/50 rounded-xl"
+            >
+              <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Icon path={ICONS.code} size={14} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <p className="font-mono text-xs text-emerald-400">
                     {c.sha}
                   </p>
-                  <p className="text-sm">{c.message}</p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {c.repo} · {formatDate(c.timestamp)}{" "}
-                    {formatTime(c.timestamp)}
-                  </p>
+                  {c.source === "manual" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-700 text-stone-400">
+                      manual
+                    </span>
+                  )}
+                  {c.filesChanged > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-700 text-stone-400">
+                      {c.filesChanged} file{c.filesChanged !== 1 && "s"}
+                      {c.insertions > 0 && (
+                        <span className="text-emerald-400 ml-1">
+                          +{c.insertions}
+                        </span>
+                      )}
+                      {c.deletions > 0 && (
+                        <span className="text-rose-400 ml-1">
+                          -{c.deletions}
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </div>
+                <p className="text-sm">{c.message}</p>
+                <p className="text-xs text-stone-500 mt-1">
+                  {c.repo}
+                  {c.branch && (
+                    <span className="text-emerald-400/70 ml-1">
+                      ({c.branch})
+                    </span>
+                  )}
+                  {c.author && <span className="ml-1">by {c.author}</span>}
+                  {" · "}
+                  {formatDate(c.timestamp)} {formatTime(c.timestamp)}
+                </p>
               </div>
-            ))
-          )}
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -1669,10 +1924,10 @@ function AnalyticsView({ data }) {
   }, [data.sessions, range, now]);
 
   const COLORS = [
-    "#6366f1",
-    "#a855f7",
-    "#ec4899",
     "#f59e0b",
+    "#f97316",
+    "#ef4444",
+    "#a855f7",
     "#10b981",
     "#06b6d4",
   ];
@@ -1684,11 +1939,11 @@ function AnalyticsView({ data }) {
     return (
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col items-center justify-center py-24 text-center">
-          <Icon path={ICONS.chart} size={40} className="text-slate-600 mb-4" />
-          <h3 className="text-xl font-semibold text-slate-300 mb-2">
+          <Icon path={ICONS.chart} size={40} className="text-stone-600 mb-4" />
+          <h3 className="text-xl font-semibold text-stone-300 mb-2">
             No data yet
           </h3>
-          <p className="text-slate-500 max-w-sm">
+          <p className="text-stone-500 max-w-sm">
             Complete some work sessions to see your productivity analytics and
             work patterns here.
           </p>
@@ -1702,16 +1957,16 @@ function AnalyticsView({ data }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Analytics</h2>
-          <p className="text-slate-400">
+          <p className="text-stone-400">
             Deep insights into your work patterns
           </p>
         </div>
-        <div className="flex gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl">
+        <div className="flex gap-1 bg-stone-900 border border-stone-800 p-1 rounded-xl">
           {["week", "month", "year"].map((r) => (
             <button
               key={r}
               onClick={() => setRange(r)}
-              className={`px-4 py-1.5 rounded-lg text-sm capitalize ${range === r ? "bg-indigo-500 text-white" : "text-slate-400"}`}
+              className={`px-4 py-1.5 rounded-lg text-sm capitalize ${range === r ? "bg-amber-500 text-white" : "text-stone-400"}`}
             >
               {r}
             </button>
@@ -1720,59 +1975,59 @@ function AnalyticsView({ data }) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5">
-          <p className="text-xs text-slate-400 uppercase">Total</p>
+        <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-5">
+          <p className="text-xs text-stone-400 uppercase">Total</p>
           <p className="text-3xl font-bold mt-1">
             {totalHrs.toFixed(1)}
-            <span className="text-lg text-slate-400">h</span>
+            <span className="text-lg text-stone-400">h</span>
           </p>
         </div>
-        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5">
-          <p className="text-xs text-slate-400 uppercase">Daily Avg</p>
+        <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-5">
+          <p className="text-xs text-stone-400 uppercase">Daily Avg</p>
           <p className="text-3xl font-bold mt-1">
             {avgHrs}
-            <span className="text-lg text-slate-400">h</span>
+            <span className="text-lg text-stone-400">h</span>
           </p>
         </div>
-        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5">
-          <p className="text-xs text-slate-400 uppercase">Peak Day</p>
+        <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-5">
+          <p className="text-xs text-stone-400 uppercase">Peak Day</p>
           <p className="text-3xl font-bold mt-1">
             {maxDay.toFixed(1)}
-            <span className="text-lg text-slate-400">h</span>
+            <span className="text-lg text-stone-400">h</span>
           </p>
         </div>
       </div>
 
-      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+      <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
         <h3 className="font-semibold mb-4">Work Hours Over Time</h3>
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={rangeData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-            <XAxis dataKey="day" stroke="#64748b" fontSize={11} />
-            <YAxis stroke="#64748b" fontSize={11} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#292524" />
+            <XAxis dataKey="day" stroke="#78716c" fontSize={11} />
+            <YAxis stroke="#78716c" fontSize={11} />
             <Tooltip
               contentStyle={{
-                background: "#0f172a",
-                border: "1px solid #334155",
+                background: "#1c1917",
+                border: "1px solid #44403c",
                 borderRadius: 8,
               }}
             />
             <Line
               type="monotone"
               dataKey="hours"
-              stroke="#6366f1"
+              stroke="#f59e0b"
               strokeWidth={2}
-              dot={{ fill: "#6366f1", r: 3 }}
+              dot={{ fill: "#f59e0b", r: 3 }}
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+        <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
           <h3 className="font-semibold mb-4">Work by Tag</h3>
           {tagData.length === 0 ? (
-            <p className="text-slate-500 text-center py-8">
+            <p className="text-stone-500 text-center py-8">
               No tagged sessions yet
             </p>
           ) : (
@@ -1793,8 +2048,8 @@ function AnalyticsView({ data }) {
                 </Pie>
                 <Tooltip
                   contentStyle={{
-                    background: "#0f172a",
-                    border: "1px solid #334155",
+                    background: "#1c1917",
+                    border: "1px solid #44403c",
                     borderRadius: 8,
                   }}
                 />
@@ -1803,26 +2058,26 @@ function AnalyticsView({ data }) {
           )}
         </div>
 
-        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+        <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
           <h3 className="font-semibold mb-4">Peak Hours</h3>
           <ResponsiveContainer width="100%" height={250}>
             <BarChart data={hourlyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#292524" />
               <XAxis
                 dataKey="hour"
-                stroke="#64748b"
+                stroke="#78716c"
                 fontSize={11}
                 interval={3}
               />
-              <YAxis stroke="#64748b" fontSize={11} />
+              <YAxis stroke="#78716c" fontSize={11} />
               <Tooltip
                 contentStyle={{
-                  background: "#0f172a",
-                  border: "1px solid #334155",
+                  background: "#1c1917",
+                  border: "1px solid #44403c",
                   borderRadius: 8,
                 }}
               />
-              <Bar dataKey="minutes" fill="#a855f7" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="minutes" fill="#f97316" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -1906,8 +2161,14 @@ function ExportView({ data, showToast }) {
       Date: formatDate(c.timestamp),
       Time: formatTime(c.timestamp),
       Repository: sanitizeCell(c.repo),
+      Branch: c.branch || "",
+      Author: c.author || "",
       SHA: c.sha,
       Message: sanitizeCell(c.message),
+      "Files Changed": c.filesChanged ?? "",
+      "+Lines": c.insertions ?? "",
+      "-Lines": c.deletions ?? "",
+      Source: c.source || "manual",
     }));
 
     // Sheet 4: Totals
@@ -2006,17 +2267,17 @@ function ExportView({ data, showToast }) {
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
         <h2 className="text-2xl font-bold">Export Smart Report</h2>
-        <p className="text-slate-400">
+        <p className="text-stone-400">
           Generate professional reports for your manager
         </p>
       </div>
 
-      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+      <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
         <h3 className="font-semibold mb-4">Report Configuration</h3>
 
         <div className="space-y-5">
           <div>
-            <label className="text-xs text-slate-400 uppercase tracking-wide">
+            <label className="text-xs text-stone-400 uppercase tracking-wide">
               Time Period
             </label>
             <div className="grid grid-cols-4 gap-2 mt-2">
@@ -2024,7 +2285,7 @@ function ExportView({ data, showToast }) {
                 <button
                   key={p}
                   onClick={() => setPeriod(p)}
-                  className={`py-3 rounded-xl text-sm capitalize font-medium ${period === p ? "bg-indigo-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
+                  className={`py-3 rounded-xl text-sm capitalize font-medium ${period === p ? "bg-amber-500 text-white" : "bg-stone-800 text-stone-400 hover:bg-stone-700"}`}
                 >
                   {p}
                 </button>
@@ -2033,13 +2294,13 @@ function ExportView({ data, showToast }) {
           </div>
 
           <div>
-            <label className="text-xs text-slate-400 uppercase tracking-wide">
+            <label className="text-xs text-stone-400 uppercase tracking-wide">
               Format
             </label>
             <div className="grid grid-cols-2 gap-2 mt-2">
               <button
                 onClick={() => setFormat("xlsx")}
-                className={`py-3 rounded-xl text-sm font-medium ${format === "xlsx" ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-400"}`}
+                className={`py-3 rounded-xl text-sm font-medium ${format === "xlsx" ? "bg-emerald-500 text-white" : "bg-stone-800 text-stone-400"}`}
               >
                 <span className="flex items-center justify-center gap-2">
                   <Icon path={ICONS.spreadsheet} size={16} /> Excel (.xlsx) — Recommended
@@ -2047,7 +2308,7 @@ function ExportView({ data, showToast }) {
               </button>
               <button
                 onClick={() => setFormat("csv")}
-                className={`py-3 rounded-xl text-sm font-medium ${format === "csv" ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-400"}`}
+                className={`py-3 rounded-xl text-sm font-medium ${format === "csv" ? "bg-emerald-500 text-white" : "bg-stone-800 text-stone-400"}`}
               >
                 <span className="flex items-center justify-center gap-2">
                   <Icon path={ICONS.fileText} size={16} /> CSV
@@ -2058,14 +2319,14 @@ function ExportView({ data, showToast }) {
 
           <button
             onClick={format === "xlsx" ? exportExcel : exportCSV}
-            className="w-full py-4 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/30"
+            className="w-full py-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 font-semibold flex items-center justify-center gap-2 shadow-lg shadow-amber-500/30"
           >
             <Icon path={ICONS.download} size={20} /> Generate & Download Report
           </button>
         </div>
       </div>
 
-      <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
+      <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-6">
         <h3 className="font-semibold mb-4 flex items-center gap-2">
           <Icon path={ICONS.clipboard} size={18} /> What's included in the Excel
         </h3>
@@ -2088,9 +2349,9 @@ function ExportView({ data, showToast }) {
               desc: "All commits synced during the period",
             },
           ].map((s) => (
-            <div key={s.title} className="p-4 bg-slate-800/50 rounded-xl">
-              <p className="font-medium text-indigo-300">{s.title}</p>
-              <p className="text-xs text-slate-400 mt-1">{s.desc}</p>
+            <div key={s.title} className="p-4 bg-stone-800/50 rounded-xl">
+              <p className="font-medium text-amber-300">{s.title}</p>
+              <p className="text-xs text-stone-400 mt-1">{s.desc}</p>
             </div>
           ))}
         </div>
@@ -2126,28 +2387,28 @@ function SettingsModal({ open, onClose, data, updateSettings, setData }) {
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
-        className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md"
+        className="bg-stone-900 border border-stone-800 rounded-2xl p-6 w-full max-w-md"
       >
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-bold">Settings</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close settings">
+          <button onClick={onClose} className="text-stone-400 hover:text-white" aria-label="Close settings">
             ✕
           </button>
         </div>
         <div className="space-y-4">
           <div>
-            <label className="text-xs text-slate-400">
+            <label className="text-xs text-stone-400">
               Daily Work Goal (hours)
             </label>
             <input
               type="number"
               value={form.dailyGoal || 8}
               onChange={(e) => setForm({ ...form, dailyGoal: +e.target.value })}
-              className="w-full mt-1 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm"
+              className="w-full mt-1 px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm"
             />
           </div>
           <div>
-            <label className="text-xs text-slate-400">
+            <label className="text-xs text-stone-400">
               Idle Detection (minutes, 0=off)
             </label>
             <input
@@ -2156,7 +2417,7 @@ function SettingsModal({ open, onClose, data, updateSettings, setData }) {
               onChange={(e) =>
                 setForm({ ...form, idleMinutes: +e.target.value })
               }
-              className="w-full mt-1 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm"
+              className="w-full mt-1 px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm"
             />
           </div>
           <div className="flex gap-2">
@@ -2165,7 +2426,7 @@ function SettingsModal({ open, onClose, data, updateSettings, setData }) {
                 updateSettings(form);
                 onClose();
               }}
-              className="flex-1 py-2.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 font-medium"
+              className="flex-1 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 font-medium"
             >
               Save
             </button>
@@ -2198,7 +2459,7 @@ function Toast({ toast }) {
             initial={{ y: 50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 50, opacity: 0 }}
-            className="fixed bottom-6 right-6 z-50 px-5 py-3 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl flex items-center gap-2"
+            className="fixed bottom-6 right-6 z-50 px-5 py-3 bg-stone-800 border border-stone-700 rounded-xl shadow-2xl flex items-center gap-2"
           >
             <Icon
               path={toast.type === "error" ? ICONS.alert : ICONS.check}
