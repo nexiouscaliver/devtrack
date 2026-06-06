@@ -279,6 +279,34 @@ export default function App() {
     return () => clearInterval(id);
   }, [activeSession]);
 
+  // Idle detection — auto-stop session after configured minutes
+  useEffect(() => {
+    const idleMs = (data.settings.idleMinutes || 0) * 60000;
+    if (!activeSession || idleMs === 0) return;
+
+    let lastActivity = Date.now();
+    let idleCheck;
+
+    const resetIdle = () => {
+      lastActivity = Date.now();
+    };
+
+    const events = ["mousemove", "keydown", "mousedown", "touchstart", "scroll"];
+    events.forEach((e) => window.addEventListener(e, resetIdle));
+
+    idleCheck = setInterval(() => {
+      if (Date.now() - lastActivity >= idleMs) {
+        stopSession();
+        showToast("Session auto-stopped due to inactivity", "error");
+      }
+    }, 30000);
+
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, resetIdle));
+      clearInterval(idleCheck);
+    };
+  }, [activeSession, data.settings.idleMinutes]);
+
   // Restore active session on mount
   useEffect(() => {
     const running = data.sessions.find((s) => s.status === "running");
@@ -642,7 +670,7 @@ function Dashboard({
                 <Icon path={ICONS.play} size={16} /> Start Work
               </button>
               <button
-                onClick={() => setView("timer")}
+                onClick={() => startSession("break", [], "")}
                 className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-medium flex items-center gap-2"
               >
                 <Icon path={ICONS.coffee} size={16} /> Take a Break
@@ -1231,7 +1259,10 @@ function GitView({ data, addCommit, setData, showToast }) {
         `https://api.github.com/users/${username}/events`,
         { headers },
       );
-      if (!res.ok) throw new Error("API error");
+      if (res.status === 401) throw new Error("Invalid GitHub token — check your settings");
+      if (res.status === 403) throw new Error("API rate limited — try again later or add a personal access token");
+      if (res.status === 404) throw new Error("GitHub user not found — check the username");
+      if (!res.ok) throw new Error(`GitHub API error (${res.status})`);
       const events = await res.json();
       const commits = events
         .filter((e) => e.type === "PushEvent")
@@ -1251,7 +1282,7 @@ function GitView({ data, addCommit, setData, showToast }) {
       }));
       showToast(`Fetched ${commits.length} commits`);
     } catch (err) {
-      showToast("Failed to fetch commits. Check username/token.", "error");
+      showToast(err.message || "Failed to fetch commits. Check your connection.", "error");
     }
     setLoading(false);
   };
@@ -1900,6 +1931,15 @@ function SettingsModal({ open, onClose, data, updateSettings, setData }) {
   useEffect(() => {
     setForm(data.settings);
   }, [data.settings]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [open, onClose]);
 
   if (!open) return null;
 
