@@ -197,6 +197,14 @@ const startOfDay = (ts) => {
   return d.getTime();
 };
 
+const sanitizeCell = (val) => {
+  const str = String(val ?? "");
+  if (/^[=+\-@\t\r]/.test(str)) {
+    return "'" + str;
+  }
+  return str;
+};
+
 const STORAGE_KEY = "devtrack_data_v1";
 
 const DEFAULT_DATA = {
@@ -603,13 +611,7 @@ function Dashboard({
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Hero */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-800 p-8">
-        <img
-          src="https://image.qwenlm.ai/public_source/6fbaaf9f-58dc-4ee2-83be-c378467e6a88/10621388c-bebf-9b53-9448-b867ec9bc8a7.png"
-          className="absolute inset-0 w-full h-full object-cover opacity-30"
-          alt=""
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/80 to-transparent" />
+      <div className="relative overflow-hidden rounded-2xl border border-slate-800 p-8 bg-gradient-to-br from-indigo-500/10 via-slate-950 to-purple-500/10">
         <div className="relative">
           <p className="text-slate-400 text-sm mb-1">
             {new Date().toLocaleDateString("en", {
@@ -1241,8 +1243,9 @@ function GitView({ data, addCommit, setData, showToast }) {
 
   const addManual = () => {
     if (!manualCommit.message) return;
+    const sha = manualCommit.sha.trim();
     addCommit({
-      sha: manualCommit.sha || Math.random().toString(36).substring(2, 9),
+      sha: sha || "manual",
       message: manualCommit.message,
       repo: manualCommit.repo || "manual",
       timestamp: Date.now(),
@@ -1663,10 +1666,12 @@ function ExportView({ data, showToast }) {
           breaks.reduce((a, s) => a + s.duration, 0) / 3600000
         ).toFixed(2),
         Commits: dayCommits.length,
-        Notes: work
-          .map((s) => s.notes)
-          .filter(Boolean)
-          .join("; "),
+        Notes: sanitizeCell(
+          work
+            .map((s) => s.notes)
+            .filter(Boolean)
+            .join("; "),
+        ),
       });
     }
 
@@ -1677,17 +1682,17 @@ function ExportView({ data, showToast }) {
       "End Time": formatTime(s.end),
       "Duration (min)": +((s.duration || 0) / 60000).toFixed(1),
       Type: s.type,
-      Tags: (s.tags || []).join(", "),
-      Notes: s.notes || "",
+      Tags: sanitizeCell((s.tags || []).join(", ")),
+      Notes: sanitizeCell(s.notes || ""),
     }));
 
     // Sheet 3: Git Activity
     const gitSheet = commits.map((c) => ({
       Date: formatDate(c.timestamp),
       Time: formatTime(c.timestamp),
-      Repository: c.repo,
+      Repository: sanitizeCell(c.repo),
       SHA: c.sha,
-      Message: c.message,
+      Message: sanitizeCell(c.message),
     }));
 
     // Sheet 4: Totals
@@ -1767,7 +1772,11 @@ function ExportView({ data, showToast }) {
       ]);
     });
     const csv = rows
-      .map((r) => r.map((c) => `"${(c + "").replace(/"/g, '""')}"`).join(","))
+      .map((r) =>
+        r
+          .map((c) => `"${sanitizeCell(c).replace(/"/g, '""')}"`)
+          .join(","),
+      )
       .join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
