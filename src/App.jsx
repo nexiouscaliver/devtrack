@@ -232,7 +232,8 @@ const formatDuration = (ms) => {
 
 const formatTime = (ts) =>
   new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const formatDate = (ts) => new Date(ts).toLocaleDateString();
+const formatDate = (ts) =>
+  new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const isToday = (ts) => {
   const d = new Date(ts),
     n = new Date();
