@@ -260,9 +260,14 @@ export default function App() {
   const [elapsed, setElapsed] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const saveTimer = useRef(null);
 
   useEffect(() => {
-    save(data);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => save(data), 300);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
   }, [data]);
 
   // Timer tick
@@ -398,7 +403,7 @@ export default function App() {
       bestStreak,
       sessions: data.sessions,
     };
-  }, [data]);
+  }, [data.sessions, data.settings.dailyGoal]);
 
   // Weekly chart data
   const weeklyData = useMemo(() => {
@@ -432,7 +437,7 @@ export default function App() {
       });
     }
     return arr;
-  }, [data]);
+  }, [data.sessions]);
 
   const nav = [
     { id: "dashboard", label: "Dashboard", icon: ICONS.dashboard },
@@ -840,8 +845,12 @@ function TimerView({
     }
   }, [activeSession?.id]);
 
-  const todaySessions = data.sessions.filter(
-    (s) => isToday(s.start) && s.status === "completed",
+  const todaySessions = useMemo(
+    () =>
+      data.sessions.filter(
+        (s) => isToday(s.start) && s.status === "completed",
+      ),
+    [data.sessions],
   );
 
   return (
@@ -1013,15 +1022,21 @@ function SessionsView({ data, deleteSession, updateSession }) {
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState({});
 
-  const filtered = data.sessions
-    .filter((s) => filter === "all" || s.type === filter)
-    .filter(
-      (s) =>
-        !search ||
-        (s.notes || "").toLowerCase().includes(search.toLowerCase()) ||
-        s.tags?.some((t) => t.toLowerCase().includes(search.toLowerCase())),
-    )
-    .sort((a, b) => b.start - a.start);
+  const filtered = useMemo(
+    () =>
+      data.sessions
+        .filter((s) => filter === "all" || s.type === filter)
+        .filter(
+          (s) =>
+            !search ||
+            (s.notes || "").toLowerCase().includes(search.toLowerCase()) ||
+            s.tags?.some((t) =>
+              t.toLowerCase().includes(search.toLowerCase()),
+            ),
+        )
+        .sort((a, b) => b.start - a.start),
+    [data.sessions, filter, search],
+  );
 
   const grouped = filtered.reduce((acc, s) => {
     const key = formatDate(s.start);
