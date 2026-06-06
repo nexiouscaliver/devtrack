@@ -290,6 +290,23 @@ function finalizeSheet(ws, colWidths, freezeRef, autoFilterRef) {
   // Column widths
   ws["!cols"] = colWidths.map((w) => ({ wch: w }));
 
+  // Compute and set !ref — xlsx uses this to determine the data range
+  // Without it, all cells are silently dropped on write
+  if (!ws["!ref"]) {
+    let maxR = 0, maxC = 0;
+    for (const key of Object.keys(ws)) {
+      if (key.startsWith("!")) continue;
+      const match = key.match(/^([A-Z]+)(\d+)$/);
+      if (match) {
+        const c = match[1].split("").reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
+        const r = parseInt(match[2], 10) - 1;
+        if (r > maxR) maxR = r;
+        if (c > maxC) maxC = c;
+      }
+    }
+    ws["!ref"] = `${colLetter(0)}1:${colLetter(maxC)}${maxR + 1}`;
+  }
+
   // Auto-filter
   if (autoFilterRef) {
     ws["!autofilter"] = { ref: autoFilterRef };
@@ -992,12 +1009,17 @@ export function generateExcelReport(data, period) {
   // Sheet 6: Raw Data
   XLSX.utils.book_append_sheet(wb, buildRawDataSheet(prep), "Raw Data");
 
-  // Download
+  // Download — use XLSX.write() with cellStyles:true to preserve formatting
   const periodLabel = period.charAt(0).toUpperCase() + period.slice(1);
-  XLSX.writeFile(
-    wb,
-    `DevTrack_Report_${periodLabel}_${formatDate(Date.now()).replace(/\s/g, "-")}.xlsx`
-  );
+  const filename = `DevTrack_Report_${periodLabel}_${formatDate(Date.now()).replace(/\s/g, "-")}.xlsx`;
+  const wbOut = XLSX.writeXLSX(wb, { type: "array", cellStyles: true });
+  const blob = new Blob([wbOut], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /**
