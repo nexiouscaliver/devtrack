@@ -9,6 +9,16 @@ const PORT = 9001;
 
 app.use(express.json());
 
+// --- Request logging ---
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const ms = Date.now() - start;
+    console.log(`${req.method} ${req.originalUrl} → ${res.statusCode} (${ms}ms)`);
+  });
+  next();
+});
+
 // --- Helper: shell-escape a single argument ---
 function shEscape(str) {
   return "'" + String(str).replace(/'/g, "'\\''") + "'";

@@ -1985,6 +1985,23 @@ function GitView({ data, addCommit, setData, showToast, importEstimatedSession, 
         throw new Error(err.error || "Failed to fetch git log");
       }
       const result = await res.json();
+
+      // Auto-detect git user identity from this repo
+      let detectedUser = null;
+      try {
+        const userRes = await fetch("/api/git/user", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: repo.path }),
+        });
+        if (userRes.ok) {
+          const userData = await userRes.json();
+          if (userData.name || userData.email) {
+            detectedUser = { name: userData.name, email: userData.email };
+          }
+        }
+      } catch { /* non-critical */ }
+
       // Merge: replace old commits from this repo path, add new ones
       setData((d) => {
         const others = d.commits.filter(
@@ -1994,6 +2011,19 @@ function GitView({ data, addCommit, setData, showToast, importEstimatedSession, 
           ...c,
           source: "local",
         }));
+
+        // Update gitAuthors: auto-add detected identity if not already known
+        const prevAuthors = d.settings.gitAuthors || { identities: [], autoDetected: null };
+        const identities = [...(prevAuthors.identities || [])];
+        if (detectedUser) {
+          const alreadyKnown = identities.some(
+            (id) => id.email?.toLowerCase() === detectedUser.email?.toLowerCase(),
+          );
+          if (!alreadyKnown) {
+            identities.push(detectedUser);
+          }
+        }
+
         return {
           ...d,
           commits: [...newCommits, ...others],
@@ -2002,6 +2032,10 @@ function GitView({ data, addCommit, setData, showToast, importEstimatedSession, 
             trackedRepos: (d.settings.trackedRepos || []).map((r) =>
               r.id === repo.id ? { ...r, lastSync: Date.now() } : r,
             ),
+            gitAuthors: {
+              identities,
+              autoDetected: detectedUser || prevAuthors.autoDetected,
+            },
           },
         };
       });
@@ -2254,37 +2288,39 @@ function GitView({ data, addCommit, setData, showToast, importEstimatedSession, 
         <h3 className="font-semibold mb-4 flex items-center gap-2">
           <Icon path={ICONS.plus} size={18} /> Manual Commit
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <input
-            value={manualCommit.repo}
-            onChange={(e) =>
-              setManualCommit({ ...manualCommit, repo: e.target.value })
-            }
-            placeholder="Repository"
-            className="px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
-          />
-          <input
-            value={manualCommit.message}
-            onChange={(e) =>
-              setManualCommit({ ...manualCommit, message: e.target.value })
-            }
-            placeholder="Commit message"
-            className="md:col-span-2 px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
-          />
-          <div className="flex gap-2">
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input
+              value={manualCommit.repo}
+              onChange={(e) =>
+                setManualCommit({ ...manualCommit, repo: e.target.value })
+              }
+              placeholder="Repository"
+              className="px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
+            />
+            <input
+              value={manualCommit.message}
+              onChange={(e) =>
+                setManualCommit({ ...manualCommit, message: e.target.value })
+              }
+              placeholder="Commit message"
+              className="md:col-span-2 px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <input
               value={manualCommit.sha}
               onChange={(e) =>
                 setManualCommit({ ...manualCommit, sha: e.target.value })
               }
               placeholder="SHA"
-              className="flex-1 px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
+              className="px-4 py-2 bg-stone-800 border border-stone-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
             />
             <button
               onClick={addManual}
-              className="px-4 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 font-medium whitespace-nowrap"
+              className="md:col-span-2 px-4 py-2 rounded-lg bg-stone-800 hover:bg-stone-700 font-medium whitespace-nowrap transition-colors"
             >
-              Add
+              Add Commit
             </button>
           </div>
         </div>
@@ -3201,30 +3237,32 @@ function SettingsModal({ open, onClose, data, updateSettings, setData, showToast
             )}
 
             {/* Add identity inputs */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Name"
-                value={newIdentityName}
-                onChange={(e) => setNewIdentityName(e.target.value)}
-                className="flex-1 px-3 py-1.5 bg-stone-800 border border-stone-700 rounded-lg text-sm"
-              />
-              <input
-                type="email"
-                placeholder="Email"
-                value={newIdentityEmail}
-                onChange={(e) => setNewIdentityEmail(e.target.value)}
-                className="flex-1 px-3 py-1.5 bg-stone-800 border border-stone-700 rounded-lg text-sm"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") addIdentity();
-                }}
-              />
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Name"
+                  value={newIdentityName}
+                  onChange={(e) => setNewIdentityName(e.target.value)}
+                  className="flex-1 px-3 py-1.5 bg-stone-800 border border-stone-700 rounded-lg text-sm"
+                />
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={newIdentityEmail}
+                  onChange={(e) => setNewIdentityEmail(e.target.value)}
+                  className="flex-1 px-3 py-1.5 bg-stone-800 border border-stone-700 rounded-lg text-sm"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addIdentity();
+                  }}
+                />
+              </div>
               <button
                 onClick={addIdentity}
                 disabled={!newIdentityName.trim() && !newIdentityEmail.trim()}
-                className="px-3 py-1.5 rounded-lg bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className="w-full py-2 rounded-lg bg-violet-500/20 text-violet-300 hover:bg-violet-500/30 text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                Add
+                Add Identity
               </button>
             </div>
           </div>
