@@ -168,6 +168,36 @@ const ICONS = {
       <polyline points="17 6 23 6 23 12" />
     </>
   ),
+  briefcase: (
+    <path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+  ),
+  wave: (
+    <path d="M18.5 12c0-1.5-1-2.5-2.5-2.5S13.5 10.5 13.5 12M13.5 12c0-1.5-1-2.5-2.5-2.5S8.5 10.5 8.5 12M8.5 12c0-1.5-1-2.5-2.5-2.5S3.5 10.5 3.5 12M22 12c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2c1.5 0 2.93.332 4.217.932" />
+  ),
+  fileText: (
+    <>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+      <polyline points="10 9 9 9 8 9" />
+    </>
+  ),
+  spreadsheet: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="3" y1="9" x2="21" y2="9" />
+      <line x1="3" y1="15" x2="21" y2="15" />
+      <line x1="9" y1="3" x2="9" y2="21" />
+      <line x1="15" y1="3" x2="15" y2="21" />
+    </>
+  ),
+  clipboard: (
+    <>
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+    </>
+  ),
 };
 
 // Helpers
@@ -308,7 +338,7 @@ export default function App() {
     setActiveSession(session);
     setElapsed(0);
     setData((d) => ({ ...d, sessions: [...d.sessions, session] }));
-    showToast(`${type === "work" ? "💼 Work" : "☕ Break"} session started`);
+    showToast(`${type === "work" ? "Work" : "Break"} session started`);
   };
 
   const stopSession = useCallback(() => {
@@ -654,7 +684,9 @@ function Dashboard({
               day: "numeric",
             })}
           </p>
-          <h1 className="text-3xl font-bold mb-2">Welcome back 👋</h1>
+          <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
+            Welcome back <Icon path={ICONS.wave} size={28} className="text-indigo-400" />
+          </h1>
           <p className="text-slate-300 max-w-xl">
             {activeSession
               ? `You're currently in a ${activeSession.type} session. Keep going!`
@@ -923,15 +955,15 @@ function TimerView({
             <div className="flex gap-2 bg-slate-800/50 p-1 rounded-xl">
               <button
                 onClick={() => setType("work")}
-                className={`flex-1 py-2 rounded-lg font-medium text-sm ${type === "work" ? "bg-indigo-500 text-white" : "text-slate-400"}`}
+                className={`flex-1 py-2 rounded-lg font-medium text-sm flex items-center justify-center gap-2 ${type === "work" ? "bg-indigo-500 text-white" : "text-slate-400"}`}
               >
-                💼 Work
+                <Icon path={ICONS.briefcase} size={14} /> Work
               </button>
               <button
                 onClick={() => setType("break")}
-                className={`flex-1 py-2 rounded-lg font-medium text-sm ${type === "break" ? "bg-amber-500 text-white" : "text-slate-400"}`}
+                className={`flex-1 py-2 rounded-lg font-medium text-sm flex items-center justify-center gap-2 ${type === "break" ? "bg-amber-500 text-white" : "text-slate-400"}`}
               >
-                ☕ Break
+                <Icon path={ICONS.coffee} size={14} /> Break
               </button>
             </div>
             <input
@@ -1870,13 +1902,17 @@ function ExportView({ data, showToast }) {
                 onClick={() => setFormat("xlsx")}
                 className={`py-3 rounded-xl text-sm font-medium ${format === "xlsx" ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-400"}`}
               >
-                📊 Excel (.xlsx) — Recommended
+                <span className="flex items-center justify-center gap-2">
+                  <Icon path={ICONS.spreadsheet} size={16} /> Excel (.xlsx) — Recommended
+                </span>
               </button>
               <button
                 onClick={() => setFormat("csv")}
                 className={`py-3 rounded-xl text-sm font-medium ${format === "csv" ? "bg-emerald-500 text-white" : "bg-slate-800 text-slate-400"}`}
               >
-                📄 CSV
+                <span className="flex items-center justify-center gap-2">
+                  <Icon path={ICONS.fileText} size={16} /> CSV
+                </span>
               </button>
             </div>
           </div>
@@ -1891,7 +1927,9 @@ function ExportView({ data, showToast }) {
       </div>
 
       <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6">
-        <h3 className="font-semibold mb-4">📋 What's included in the Excel</h3>
+        <h3 className="font-semibold mb-4 flex items-center gap-2">
+          <Icon path={ICONS.clipboard} size={18} /> What's included in the Excel
+        </h3>
         <div className="grid grid-cols-2 gap-4">
           {[
             {
