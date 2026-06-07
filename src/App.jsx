@@ -400,6 +400,53 @@ function validateDataShape(parsed) {
   );
 }
 
+// Deep-sanitize every session/commit object so missing or invalid fields get safe defaults.
+// Defence-in-depth: run after load(), server sync, and version restore.
+function sanitizeData(data) {
+  if (!data || typeof data !== "object") return null;
+  const validStatuses = ["running", "paused", "completed"];
+  return {
+    sessions: (Array.isArray(data.sessions) ? data.sessions : []).map((s) => ({
+      id: s.id || `s_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      type: s.type || "work",
+      start: typeof s.start === "number" ? s.start : Date.now(),
+      end: s.end ?? null,
+      duration: typeof s.duration === "number" ? s.duration : 0,
+      tags: Array.isArray(s.tags) ? s.tags : [],
+      notes: typeof s.notes === "string" ? s.notes : "",
+      status: validStatuses.includes(s.status) ? s.status : "completed",
+      pauses: Array.isArray(s.pauses) ? s.pauses : [],
+      ...(s.totalWorkTime != null ? { totalWorkTime: s.totalWorkTime } : {}),
+      ...(s.totalBreakTime != null ? { totalBreakTime: s.totalBreakTime } : {}),
+    })),
+    commits: (Array.isArray(data.commits) ? data.commits : []).map((c) => ({
+      sha: c.sha || "unknown",
+      message: c.message || "",
+      repo: c.repo || "",
+      repoPath: c.repoPath || "",
+      timestamp: typeof c.timestamp === "number" ? c.timestamp : Date.now(),
+      author: c.author || "",
+      authorEmail: c.authorEmail || "",
+      branch: c.branch || "",
+      source: c.source || "manual",
+      filesChanged: typeof c.filesChanged === "number" ? c.filesChanged : 0,
+      insertions: typeof c.insertions === "number" ? c.insertions : 0,
+      deletions: typeof c.deletions === "number" ? c.deletions : 0,
+    })),
+    settings: {
+      dailyGoal: data.settings?.dailyGoal ?? 8,
+      trackedRepos: Array.isArray(data.settings?.trackedRepos)
+        ? data.settings.trackedRepos
+        : [],
+      gitAuthors: data.settings?.gitAuthors ?? {
+        identities: [],
+        autoDetected: null,
+      },
+    },
+    ui: { ...DEFAULT_DATA.ui, ...(data.ui || {}) },
+  };
+}
+
 function migrate(parsed) {
   if ("githubToken" in parsed.settings || "githubUser" in parsed.settings) {
     delete parsed.settings.githubToken;
@@ -437,7 +484,7 @@ const load = () => {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!validateDataShape(parsed)) return null;
-    return migrate(parsed);
+    return sanitizeData(migrate(parsed));
   } catch {
     return null;
   }
@@ -451,33 +498,41 @@ const loadFromServer = async () => {
     if (!result.exists || !result.data) return null;
     const parsed = result.data;
     if (!validateDataShape(parsed)) return null;
-    return migrate(parsed);
+    return sanitizeData(migrate(parsed));
   } catch {
     return null;
   }
 };
 
+// Module-level refs for server retry coordination (set inside App())
+const _serverSaveFn = { current: null }; // will be assigned in App()
+const _onQuotaExceeded = { current: null };
+
 const save = (data) => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    if (_onQuotaExceeded.current) _onQuotaExceeded.current(false);
   } catch (e) {
     if (
       e instanceof DOMException &&
       (e.name === "QuotaExceededError" || e.code === 22)
     ) {
-      console.error("DevTrack: localStorage quota exceeded. Data not saved.");
+      if (_onQuotaExceeded.current) _onQuotaExceeded.current(true);
     } else {
       throw e;
     }
   }
-  // Fire-and-forget save to server (durable backup)
-  fetch("/api/data", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ data }),
-  }).catch(() => {
-    console.warn("DevTrack: server backup unavailable — data saved to localStorage only");
-  });
+  // Server save (with retry logic via _serverSaveFn)
+  if (_serverSaveFn.current) {
+    _serverSaveFn.current(data);
+  } else {
+    // Fallback: fire-and-forget (before App mounts)
+    fetch("/api/data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data }),
+    }).catch(() => {});
+  }
 };
 
 export default function App() {
@@ -503,15 +558,94 @@ export default function App() {
   const [syncOpen, setSyncOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const [quotaWarning, setQuotaWarning] = useState(false);
+  const [serverStatus, setServerStatus] = useState("connected"); // connected | disconnected
+  const serverStatusRef = useRef("connected");
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef(null);
+  const pendingSaveRef = useRef(false);
   const saveTimer = useRef(null);
 
+  // Wire module-level save hooks
+  _onQuotaExceeded.current = setQuotaWarning;
+
+  // Server save with exponential-backoff retry (max 3 attempts)
+  const saveToServer = useCallback((data, attempt = 1) => {
+    if (retryTimerRef.current && attempt === 1) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    fetch("/api/data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data }),
+    }).then(() => {
+      retryCountRef.current = 0;
+      if (serverStatusRef.current !== "connected") {
+        serverStatusRef.current = "connected";
+        setServerStatus("connected");
+      }
+    }).catch(() => {
+      if (attempt < 3) {
+        retryTimerRef.current = setTimeout(
+          () => saveToServer(data, attempt + 1),
+          1000 * Math.pow(2, attempt - 1),
+        );
+      } else {
+        retryCountRef.current = 0;
+        if (serverStatusRef.current !== "disconnected") {
+          serverStatusRef.current = "disconnected";
+          setServerStatus("disconnected");
+        }
+      }
+    });
+  }, []);
+  _serverSaveFn.current = saveToServer;
+
+  // Debounced save — tracks whether a save is pending for lifecycle handlers
   useEffect(() => {
+    if (syncOpen) return; // skip auto-save during sync (SyncView manages its own saves)
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => save(data), 300);
+    pendingSaveRef.current = true;
+    saveTimer.current = setTimeout(() => {
+      save(data);
+      pendingSaveRef.current = false;
+    }, 300);
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [data]);
+  }, [data, syncOpen]);
+
+  // Force-save on page unload using sendBeacon for the server leg
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (!pendingSaveRef.current) return;
+      clearTimeout(saveTimer.current);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dataRef.current)); } catch {}
+      try {
+        navigator.sendBeacon?.(
+          "/api/data",
+          new Blob([JSON.stringify({ data: dataRef.current })], { type: "application/json" }),
+        );
+      } catch {}
+      pendingSaveRef.current = false;
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  // Save when tab becomes hidden (covers minimise, switch tab, etc.)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden" && pendingSaveRef.current) {
+        clearTimeout(saveTimer.current);
+        save(dataRef.current);
+        pendingSaveRef.current = false;
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
 
   // Persist UI preferences alongside data (piggybacks on existing debounce + server save)
   const updateUi = (updates) => {
@@ -526,15 +660,54 @@ export default function App() {
 
   // Sync from server on mount — only apply if user hasn't changed data during the async gap.
   // The ref guards against React 18 Strict Mode's double-mount in development.
+  // Also performs: health check, corruption recovery from server.
   const serverSynced = useRef(false);
   const dataRef = useRef(data);
   useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => {
     if (serverSynced.current) return;
     serverSynced.current = true;
+
+    // Health check — sets initial server status
+    fetch("/api/health")
+      .then((r) => {
+        if (!r.ok) throw new Error();
+        serverStatusRef.current = "connected";
+        setServerStatus("connected");
+      })
+      .catch(() => {
+        serverStatusRef.current = "disconnected";
+        setServerStatus("disconnected");
+      });
+
     const mountHash = JSON.stringify(data);
+    const localWasNull = !load(); // detect corrupted/empty localStorage
 
     loadFromServer().then((serverData) => {
+      // Corruption recovery: if localStorage was empty/corrupt but server has data, restore from server
+      if (localWasNull && serverData) {
+        const restored = sanitizeData(serverData);
+        if (restored) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(restored));
+          setData(restored);
+          setView(restored.ui?.view || "dashboard");
+          const running = restored.sessions.find((s) => s.status === "running" || s.status === "paused") || null;
+          if (running) {
+            setActiveSession(running);
+            if (running.status === "paused") {
+              const currentPause = (running.pauses || []).find((p) => p.end === null);
+              setElapsed(currentPause ? Date.now() - currentPause.start : 0);
+            } else {
+              const paused = (running.pauses || []).reduce((s, p) => s + ((p.end || 0) - p.start), 0);
+              setElapsed(Date.now() - running.start - paused);
+            }
+          }
+          showToast("Local data was corrupted — recovered from server backup", "warning");
+          return;
+        }
+      }
+
+      // Normal server sync path
       if (!serverData) return;
       if (JSON.stringify(dataRef.current) !== mountHash) return;
 
@@ -554,6 +727,27 @@ export default function App() {
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cross-tab conflict detection — listen for localStorage writes from other tabs
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key !== STORAGE_KEY || !e.newValue) return;
+      if (pendingSaveRef.current) {
+        // We have unsaved changes that conflict with the incoming data
+        showToast("Another tab modified your data — your unsaved changes may conflict.", "warning");
+      } else {
+        // No pending local changes — safely adopt the other tab's data
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (validateDataShape(parsed)) {
+            setData(sanitizeData(migrate(parsed)));
+          }
+        } catch { /* ignore malformed */ }
+      }
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
   // Timer tick — update every second while session is active (running or paused)
@@ -576,6 +770,36 @@ export default function App() {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [activeSession]);
+
+  // Session checkpoint — every 30 s while a session is active, persist a checkpoint
+  // so that on crash/reload the pause state is at most 30 s inaccurate.
+  const checkpointTimerRef = useRef(null);
+  useEffect(() => {
+    if (!activeSession || activeSession.status === "completed") {
+      if (checkpointTimerRef.current) {
+        clearInterval(checkpointTimerRef.current);
+        checkpointTimerRef.current = null;
+      }
+      return;
+    }
+    if (checkpointTimerRef.current) return; // already running
+    checkpointTimerRef.current = setInterval(() => {
+      const sid = activeSession?.id;
+      if (!sid) return;
+      setData((d) => ({
+        ...d,
+        sessions: d.sessions.map((s) =>
+          s.id === sid ? { ...s, _checkpoint: Date.now() } : s
+        ),
+      }));
+    }, 30000);
+    return () => {
+      if (checkpointTimerRef.current) {
+        clearInterval(checkpointTimerRef.current);
+        checkpointTimerRef.current = null;
+      }
+    };
+  }, [activeSession?.id, activeSession?.status]);
 
   const toastTimer = useRef(null);
 
@@ -959,7 +1183,7 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-stone-950 text-stone-100 font-sans flex">
+    <div className="min-h-screen bg-stone-950 text-stone-100 font-sans flex" inert={syncOpen || undefined}>
       {/* Warm ambient gradient */}
       <div className="fixed inset-0 pointer-events-none bg-gradient-to-br from-amber-950/20 via-transparent to-orange-950/10" />
       {/* Mobile header bar */}
@@ -1223,6 +1447,34 @@ export default function App() {
         showToast={showToast}
       />
       <Toast toast={toast} />
+
+      {/* Quota warning banner */}
+      {quotaWarning && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-amber-600/90 text-white text-sm text-center py-2 px-4">
+          Storage is full — your changes are not being saved locally.
+          <button
+            className="ml-3 underline hover:no-underline font-medium"
+            onClick={() => setQuotaWarning(false)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Server backup status dot — bottom-right corner */}
+      <div
+        className="fixed bottom-4 right-4 z-50 group flex items-end justify-end"
+        title={serverStatus === "connected" ? "Server backup: connected" : "Server backup: disconnected"}
+      >
+        <div
+          className={`w-3 h-3 rounded-full transition-colors ${
+            serverStatus === "connected" ? "bg-emerald-500" : "bg-red-500"
+          }`}
+        />
+        <span className="sr-only group-hover:not-sr-only group-hover:absolute group-hover:bottom-6 group-hover:right-0 group-hover:bg-stone-800 group-hover:text-stone-200 group-hover:text-xs group-hover:px-2 group-hover:py-1 group-hover:rounded group-hover:whitespace-nowrap group-hover:shadow-lg">
+          Server backup: {serverStatus === "connected" ? "connected" : "disconnected"}
+        </span>
+      </div>
     </div>
   );
 }
@@ -3690,7 +3942,15 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
       if (dataRes.ok) {
         const dataResult = await dataRes.json();
         if (dataResult.exists && dataResult.data) {
-          const restored = migrate(dataResult.data);
+          if (!validateDataShape(dataResult.data)) {
+            showToast("Version data is corrupted — restore aborted", "error");
+            return;
+          }
+          const restored = sanitizeData(migrate(dataResult.data));
+          if (!restored) {
+            showToast("Version data could not be sanitized — restore aborted", "error");
+            return;
+          }
           applySyncResult(restored);
         }
       }
@@ -3714,7 +3974,12 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
       if (!res.ok) return;
       const result = await res.json();
       if (result.exists && result.data) {
-        const versionData = migrate(result.data);
+        if (!validateDataShape(result.data)) {
+          showToast("Version snapshot is corrupted", "error");
+          return;
+        }
+        const versionData = sanitizeData(migrate(result.data));
+        if (!versionData) return;
         const diff = computeDiff(localData, versionData);
         setPreviewVersion({ id: vId, data: versionData, diff });
       }
@@ -3733,12 +3998,14 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
   if (!open) return null;
 
   // ─── Shared header ───
-  const renderHeader = (title) => (
+  const renderHeader = (title, hideClose = false) => (
     <div className="flex items-center justify-between mb-5">
       <h3 className="text-lg font-bold">{title}</h3>
-      <button onClick={onClose} className="text-stone-400 hover:text-white transition-colors" aria-label="Close sync">
-        ✕
-      </button>
+      {!hideClose && (
+        <button onClick={onClose} className="text-stone-400 hover:text-white transition-colors" aria-label="Close sync">
+          ✕
+        </button>
+      )}
     </div>
   );
 
@@ -4394,7 +4661,7 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
         <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
           className="bg-stone-900 border border-stone-800 rounded-2xl p-6 w-full max-w-2xl">
-          {renderHeader("Syncing…")}
+          {renderHeader("Syncing…", true)}
           <div className="flex items-center justify-center py-12 gap-3 text-stone-400">
             <Icon path={ICONS.refresh} size={20} className="animate-spin" />
             <span>Creating backup and applying changes…</span>

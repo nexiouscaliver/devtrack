@@ -236,6 +236,13 @@ app.get("/api/git/health", async (_req, res) => {
 });
 
 // =====================================================
+// GET /api/health — lightweight server liveness check
+// =====================================================
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok", uptime: process.uptime() });
+});
+
+// =====================================================
 // POST /api/git/validate — check if folder is a git repo
 // =====================================================
 app.post("/api/git/validate", async (req, res) => {
