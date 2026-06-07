@@ -6,9 +6,6 @@
 
 Developer-first time tracking. 100% local. Git-native.
 
-<!-- Replace with actual demo GIF once recorded -->
-<img src="docs/demo.gif" alt="DevTrack Demo" width="800" />
-
 [![CI](https://img.shields.io/github/actions/workflow/status/nexiouscaliver/devtrack/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/nexiouscaliver/devtrack/actions)
 [![License](https://img.shields.io/github/license/nexiouscaliver/devtrack?style=flat-square&color=green)](LICENSE)
 [![Cloud Dependencies](https://img.shields.io/badge/Cloud_Dependencies-0-44cc11?style=flat-square&labelColor=1c1917)]()

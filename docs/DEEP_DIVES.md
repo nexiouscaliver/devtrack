@@ -152,6 +152,6 @@ DevTrack follows a specific set of design principles:
 | Companion server | ~600 lines (git-server.mjs) |
 | Total source | ~8,200 lines |
 | Dependencies | 6 runtime, 11 dev |
-| Build size | < 500KB gzipped |
+| Build size | ~570KB gzipped |
 | Data layer | localStorage + local disk |
 | External APIs | None |
