@@ -471,6 +471,7 @@ function sanitizeData(data) {
       pauses: Array.isArray(s.pauses) ? s.pauses : [],
       ...(s.totalWorkTime != null ? { totalWorkTime: s.totalWorkTime } : {}),
       ...(s.totalBreakTime != null ? { totalBreakTime: s.totalBreakTime } : {}),
+      ...(s.commitIds ? { commitIds: s.commitIds } : {}),
       checkpoints: Array.isArray(s.checkpoints)
         ? s.checkpoints.map((cp) => ({
             id: cp.id || `cp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -646,6 +647,31 @@ function trimLocalStorage(data, serverConfirmed) {
   };
 }
 
+/**
+ * Re-link commits to ALL work sessions based on timestamp overlap.
+ * For each work session, finds commits whose timestamps fall within [start, end].
+ * For running/paused sessions, uses Date.now() as the upper bound.
+ * Merges (union) with existing commitIds to preserve manually linked commits.
+ */
+function linkCommitsToSessions(sessions, commits) {
+  if (!Array.isArray(sessions) || !Array.isArray(commits)) return sessions;
+  const now = Date.now();
+  return sessions.map((s) => {
+    if (s.type !== "work") return s;
+    const sessionEnd = s.end ?? now;
+    const matchingShas = new Set(
+      commits
+        .filter((c) => c.timestamp >= s.start && c.timestamp <= sessionEnd)
+        .map((c) => c.sha),
+    );
+    if (matchingShas.size === 0 && !s.commitIds?.length) return s;
+    const existing = new Set(s.commitIds || []);
+    for (const sha of matchingShas) existing.add(sha);
+    const merged = [...existing];
+    return merged.length > 0 ? { ...s, commitIds: merged } : s;
+  });
+}
+
 export default function App() {
   // Load once and derive all initial state from it
   const [initialData] = useState(() => load());
@@ -818,7 +844,10 @@ export default function App() {
     loadFromServer().then((serverData) => {
       // Corruption recovery: if localStorage was empty/corrupt but server has data, restore from server
       if (localWasNull && serverData) {
-        const restored = sanitizeData(serverData);
+        const sanitized = sanitizeData(serverData);
+        const restored = sanitized
+          ? { ...sanitized, sessions: linkCommitsToSessions(sanitized.sessions, sanitized.commits) }
+          : null;
         if (restored) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(restored));
           setData(restored);
@@ -843,10 +872,14 @@ export default function App() {
       if (!serverData) return;
       if (JSON.stringify(dataRef.current) !== mountHash) return;
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(serverData));
-      setData(serverData);
-      setView(serverData.ui?.view || "dashboard");
-      const running = serverData.sessions.find((s) => s.status === "running" || s.status === "paused") || null;
+      const linked = {
+        ...serverData,
+        sessions: linkCommitsToSessions(serverData.sessions, serverData.commits),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(linked));
+      setData(linked);
+      setView(linked.ui?.view || "dashboard");
+      const running = linked.sessions.find((s) => s.status === "running" || s.status === "paused") || null;
       if (running) {
         setActiveSession(running);
         if (running.status === "paused") {
@@ -1629,6 +1662,7 @@ export default function App() {
                 pauseSession={pauseSession}
                 resumeSession={resumeSession}
                 stopSession={stopSession}
+                updateSession={updateSession}
                 addCheckpoint={addCheckpoint}
                 updateCheckpoint={updateCheckpoint}
                 deleteCheckpoint={deleteCheckpoint}
@@ -1703,7 +1737,7 @@ export default function App() {
       </div>{/* end inerted content wrapper */}
 
       <SettingsModal
-        key={settingsOpen ? "open" : "closed"}
+        key={settingsOpen ? "settings-open" : "settings-closed"}
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         data={data}
@@ -1713,7 +1747,7 @@ export default function App() {
         onOpenSync={() => { setSettingsOpen(false); setSyncOpen(true); }}
       />
       <SyncView
-        key={syncOpen ? "open" : "closed"}
+        key={syncOpen ? "sync-open" : "sync-closed"}
         open={syncOpen}
         onClose={() => setSyncOpen(false)}
         localData={data}
@@ -2058,6 +2092,7 @@ function TimerView({
   pauseSession,
   resumeSession,
   stopSession,
+  updateSession,
   addCheckpoint,
   updateCheckpoint,
   deleteCheckpoint,
@@ -2070,6 +2105,26 @@ function TimerView({
   const [editingCpId, setEditingCpId] = useState(null);
   const [editCpData, setEditCpData] = useState({ text: "", tsInput: "" });
   const timelineRef = useRef(null);
+  const persistTimer = useRef(null);
+
+  // Auto-persist tags & notes to the active session (debounced)
+  useEffect(() => {
+    if (!activeSession) return;
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(() => {
+      const parsedTags = tags.split(",").map((t) => t.trim()).filter(Boolean);
+      updateSession(activeSession.id, { tags: parsedTags, notes });
+    }, 500);
+    return () => { if (persistTimer.current) clearTimeout(persistTimer.current); };
+  }, [tags, notes, activeSession, updateSession]);
+
+  // Sync local state when activeSession changes externally (e.g. navigating back)
+  useEffect(() => {
+    if (activeSession) {
+      setTags(activeSession.tags?.join(", ") || "");
+      setNotes(activeSession.notes || "");
+    }
+  }, [activeSession?.id]); // only on session identity change, not every prop update
 
   const handleStart = () => {
     startSession(
@@ -2478,11 +2533,11 @@ function TimerView({
                           return (
                             <div
                               key={sha}
-                              className="flex items-center gap-1.5 text-xs text-stone-400"
+                              className="flex items-center gap-1.5 text-xs text-stone-400 min-w-0 overflow-hidden"
                             >
-                              <Icon path={ICONS.gitCommit} size={10} />
-                              <span className="truncate">{commit.message}</span>
-                              <span className="text-stone-500 shrink-0 ml-auto">
+                              <Icon path={ICONS.gitCommit} size={10} className="shrink-0" />
+                              <span className="truncate min-w-0">{commit.message}</span>
+                              <span className="text-stone-500 shrink-0 ml-auto whitespace-nowrap">
                                 {formatTime(commit.timestamp)}
                               </span>
                             </div>
@@ -2736,20 +2791,20 @@ function SessionsView({ data, deleteSession, updateSession, initialFilter, onFil
                                 return (
                                   <div
                                     key={sha}
-                                    className="flex items-center gap-2 text-xs text-stone-400 bg-stone-800/40 rounded-lg px-2.5 py-1.5"
+                                    className="flex items-center gap-2 text-xs text-stone-400 bg-stone-800/40 rounded-lg px-2.5 py-1.5 min-w-0 overflow-hidden"
                                   >
-                                    <Icon path={ICONS.gitCommit} size={12} />
-                                    <span className="font-mono text-stone-500">
+                                    <Icon path={ICONS.gitCommit} size={12} className="shrink-0" />
+                                    <span className="font-mono text-stone-500 shrink-0">
                                       {sha.slice(0, 7)}
                                     </span>
-                                    <span className="truncate">
+                                    <span className="truncate min-w-0">
                                       {commit.message}
                                     </span>
-                                    <span className="text-stone-500 shrink-0 ml-auto">
+                                    <span className="text-stone-500 shrink-0 ml-auto whitespace-nowrap">
                                       {formatDate(commit.timestamp)} {formatTime(commit.timestamp)}
                                     </span>
                                     {commit.repo && (
-                                      <span className="text-stone-500 shrink-0">
+                                      <span className="text-stone-500 shrink-0 whitespace-nowrap">
                                         {commit.repo}
                                       </span>
                                     )}
@@ -3079,6 +3134,11 @@ function GitView({ data, addCommit, setData, showToast, importEstimatedSession, 
           },
         };
       });
+      // Re-link commits to all sessions now that fresh commits are in state
+      setData((d) => ({
+        ...d,
+        sessions: linkCommitsToSessions(d.sessions, d.commits),
+      }));
       showToast(`Synced ${result.commits.length} commits from ${repo.name}`);
     } catch (err) {
       showToast(err.message || "Sync failed", "error");
