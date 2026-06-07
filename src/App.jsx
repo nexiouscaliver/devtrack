@@ -3571,13 +3571,6 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
   const executeSync = async () => {
     setPhase("executing");
     try {
-      const label = `pre-sync-${strategy}`;
-      await fetch("/api/data/versions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label }),
-      });
-
       let resultData;
       if (strategy === "push") {
         resultData = applyPush(localData);
@@ -3586,6 +3579,26 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
       } else {
         resultData = applyMerge(localData, serverData, diffResult, resolutions);
       }
+
+      // Version backup — only if there's disk data to back up
+      if (serverData) {
+        try {
+          await fetch("/api/data/versions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ label: `pre-sync-${strategy}` }),
+          });
+        } catch { /* non-critical — backup is best effort */ }
+      }
+
+      // Explicitly persist to disk (don't rely on debounced save)
+      try {
+        await fetch("/api/data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: resultData }),
+        });
+      } catch { /* localStorage save via applySyncResult still fires */ }
 
       applySyncResult(resultData);
       setPhase("done");
@@ -3609,12 +3622,15 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
     setPhase("executing");
     setStrategy("push");
     try {
-      // Attempt version backup (best effort — may not exist on server yet)
-      await fetch("/api/data/versions", {
+      // No version backup needed — there's no disk data to back up
+
+      // Explicitly persist to disk (don't rely on debounced save)
+      await fetch("/api/data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: "pre-sync-push" }),
-      }).catch(() => {});
+        body: JSON.stringify({ data: localData }),
+      });
+
       setPreview({
         strategy: "push",
         description: ["Local data pushed to server."],
@@ -3636,11 +3652,17 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
     setPhase("executing");
     setStrategy("pull");
     try {
-      await fetch("/api/data/versions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: "pre-sync-pull" }),
-      }).catch(() => {});
+      // Version backup — only if there's disk data to back up
+      if (serverData) {
+        try {
+          await fetch("/api/data/versions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ label: "pre-sync-pull" }),
+          });
+        } catch { /* non-critical */ }
+      }
+
       setPreview({
         strategy: "pull",
         description: ["Server data pulled to browser."],
