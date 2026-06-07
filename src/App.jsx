@@ -471,6 +471,14 @@ function sanitizeData(data) {
       pauses: Array.isArray(s.pauses) ? s.pauses : [],
       ...(s.totalWorkTime != null ? { totalWorkTime: s.totalWorkTime } : {}),
       ...(s.totalBreakTime != null ? { totalBreakTime: s.totalBreakTime } : {}),
+      checkpoints: Array.isArray(s.checkpoints)
+        ? s.checkpoints.map((cp) => ({
+            id: cp.id || `cp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            text: typeof cp.text === "string" ? cp.text : "",
+            ts: typeof cp.ts === "number" ? cp.ts : Date.now(),
+            private: cp.private === true,
+          }))
+        : [],
     })),
     commits: (Array.isArray(data.commits) ? data.commits : []).map((c) => ({
       sha: c.sha || "unknown",
@@ -497,6 +505,12 @@ function sanitizeData(data) {
       },
     },
     ui: { ...DEFAULT_DATA.ui, ...(data.ui || {}) },
+    workLog: (Array.isArray(data.workLog) ? data.workLog : []).map((e) => ({
+      id: e.id || `wl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      text: typeof e.text === "string" ? e.text : "",
+      ts: typeof e.ts === "number" ? e.ts : Date.now(),
+      private: e.private === true,
+    })),
   };
 }
 
