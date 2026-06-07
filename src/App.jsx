@@ -2796,11 +2796,11 @@ function SessionsView({ data, deleteSession, updateSession, initialFilter, onFil
                     className="bg-stone-900/50 border border-stone-800 rounded-xl p-4 hover:bg-stone-800/40 hover:border-stone-700 transition-colors"
                   >
                     {/* Main row: color bar | content | duration | actions */}
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 min-w-0">
                     <div
                       className={`w-1 self-stretch rounded ${s.type === "work" ? "bg-amber-400" : "bg-sky-400"}`}
                     />
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       {editingId === s.id ? (
                         <div className="space-y-2">
                           <input
