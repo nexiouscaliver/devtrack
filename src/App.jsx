@@ -435,6 +435,8 @@ const DEFAULT_DATA = {
     analyticsRange: "week",
     exportPeriod: "week",
     exportFormat: "xlsx",
+    exportIncludeCheckpoints: true,
+    exportIncludeWorkLog: true,
   },
 };
 
@@ -1050,6 +1052,7 @@ export default function App() {
     { id: "sessions", label: "Sessions", icon: ICONS.list },
     { id: "git", label: "Git Tracking", icon: ICONS.github },
     { id: "analytics", label: "Analytics", icon: ICONS.chart },
+    { id: "worklog", label: "Work Log", icon: ICONS.flag },
     { id: "export", label: "Export Report", icon: ICONS.download },
   ];
 
@@ -1285,6 +1288,19 @@ export default function App() {
                 gitEstimatedSessions={gitEstimatedSessions}
                 initialRange={data.ui?.analyticsRange || "week"}
                 onRangeChange={(r) => updateUi({ analyticsRange: r })}
+              />
+            )}
+            {view === "worklog" && (
+              <WorkLogView
+                data={data}
+                activeSession={activeSession}
+                addCheckpoint={addCheckpoint}
+                updateCheckpoint={updateCheckpoint}
+                deleteCheckpoint={deleteCheckpoint}
+                addWorkLogEntry={addWorkLogEntry}
+                updateWorkLogEntry={updateWorkLogEntry}
+                deleteWorkLogEntry={deleteWorkLogEntry}
+                showToast={showToast}
               />
             )}
             {view === "export" && (
@@ -3366,6 +3382,499 @@ function ExportView({ data, gitAuthors, showToast, initialPeriod, initialFormat,
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============ WORK LOG VIEW ============
+function WorkLogView({
+  data,
+  activeSession,
+  addCheckpoint,
+  updateCheckpoint,
+  deleteCheckpoint,
+  addWorkLogEntry,
+  updateWorkLogEntry,
+  deleteWorkLogEntry,
+  showToast,
+}) {
+  const [search, setSearch] = useState("");
+  const [addText, setAddText] = useState("");
+  const [addTsInput, setAddTsInput] = useState("");
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [expandedSessions, setExpandedSessions] = useState(() => {
+    const latest = (Array.isArray(data.sessions) ? data.sessions : [])
+      .filter((s) => (s.checkpoints || []).length > 0)
+      .sort((a, b) => b.start - a.start)[0];
+    return latest ? new Set([latest.id]) : new Set();
+  });
+  const [editingEntry, setEditingEntry] = useState(null);
+
+  // Merge session checkpoints and standalone work log entries into unified timeline
+  const timeline = useMemo(() => {
+    const entries = [];
+    data.sessions.forEach((s) => {
+      (s.checkpoints || []).forEach((cp) => {
+        entries.push({
+          ...cp,
+          source: "session",
+          sessionId: s.id,
+          sessionTitle: s.notes || "Untitled session",
+          sessionStart: s.start,
+          sessionEnd: s.end,
+          sessionType: s.type,
+          sessionDuration: s.duration,
+        });
+      });
+    });
+    (data.workLog || []).forEach((wl) => {
+      entries.push({ ...wl, source: "standalone" });
+    });
+    entries.sort((a, b) => b.ts - a.ts);
+    return entries;
+  }, [data.sessions, data.workLog]);
+
+  // Group entries by day
+  const grouped = useMemo(() => {
+    const groups = {};
+    timeline.forEach((entry) => {
+      const key = formatDate(entry.ts);
+      (groups[key] = groups[key] || []).push(entry);
+    });
+    return groups;
+  }, [timeline]);
+
+  // Search filtering
+  const filtered = useMemo(() => {
+    if (!search.trim()) return grouped;
+    const q = search.toLowerCase();
+    const result = {};
+    Object.entries(grouped).forEach(([date, entries]) => {
+      const matching = entries.filter(
+        (e) =>
+          e.text.toLowerCase().includes(q) ||
+          (e.sessionTitle || "").toLowerCase().includes(q)
+      );
+      if (matching.length > 0) result[date] = matching;
+    });
+    return result;
+  }, [grouped, search]);
+
+  // --- Add Note handler ---
+  const handleAddNote = () => {
+    const text = addText.trim();
+    if (!text) return;
+    const ts = addTsInput ? parseTimeInput(addTsInput) : Date.now();
+    if (addTsInput && !ts) {
+      showToast("Invalid time format — use h:mm AM/PM", "error");
+      return;
+    }
+    if (activeSession) {
+      addCheckpoint(activeSession.id, text, ts || Date.now());
+    } else {
+      addWorkLogEntry(text, ts || Date.now());
+    }
+    setAddText("");
+    setAddTsInput("");
+    setShowAddForm(false);
+  };
+
+  // --- Edit handlers ---
+  const handleStartEdit = (entry) => {
+    setEditingEntry({
+      id: entry.id,
+      type: entry.source === "standalone" ? "worklog" : "checkpoint",
+      text: entry.text,
+      tsInput: formatTimeForInput(entry.ts),
+      sessionId: entry.sessionId,
+    });
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingEntry) return;
+    const parsed = editingEntry.tsInput
+      ? parseTimeInput(editingEntry.tsInput)
+      : null;
+    if (editingEntry.tsInput && parsed === null) {
+      showToast("Invalid time format — use h:mm AM/PM", "error");
+      return;
+    }
+    const updates = { text: editingEntry.text.trim() };
+    if (parsed) updates.ts = parsed;
+    if (editingEntry.type === "checkpoint") {
+      updateCheckpoint(editingEntry.sessionId, editingEntry.id, updates);
+    } else {
+      updateWorkLogEntry(editingEntry.id, updates);
+    }
+    setEditingEntry(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingEntry(null);
+  };
+
+  // --- Delete handlers ---
+  const handleDelete = (entry) => {
+    if (!confirm("Delete this note?")) return;
+    if (entry.source === "standalone") {
+      deleteWorkLogEntry(entry.id);
+    } else {
+      deleteCheckpoint(entry.sessionId, entry.id);
+    }
+    if (editingEntry && editingEntry.id === entry.id) setEditingEntry(null);
+  };
+
+  // --- Privacy toggle ---
+  const handleTogglePrivate = (entry) => {
+    if (entry.source === "standalone") {
+      updateWorkLogEntry(entry.id, { private: !entry.private });
+    } else {
+      updateCheckpoint(entry.sessionId, entry.id, { private: !entry.private });
+    }
+  };
+
+  // --- Session expansion toggle ---
+  const toggleSession = (sessionId) => {
+    setExpandedSessions((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+
+  const isEmpty = timeline.length === 0;
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-2xl font-bold">Work Log</h2>
+          <p className="text-stone-400 text-sm">
+            Unified timeline of session checkpoints and standalone notes
+          </p>
+        </div>
+        <div className="relative">
+          <svg
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search notes..."
+            className="pl-9 pr-3 py-1.5 bg-stone-900/80 border border-stone-700/50 rounded-lg text-sm text-stone-200 placeholder:text-stone-600 focus:outline-none focus:border-amber-500/50 w-56"
+          />
+        </div>
+      </div>
+
+      {/* Add Note button + form */}
+      <div>
+        {!showAddForm ? (
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 text-sm font-medium hover:bg-amber-500/30 flex items-center gap-1.5"
+          >
+            <Icon path={ICONS.plus} size={14} /> Add Note
+          </button>
+        ) : (
+          <div className="bg-stone-800/60 border border-stone-700/50 rounded-xl p-3 space-y-2">
+            <input
+              type="text"
+              value={addText}
+              onChange={(e) => setAddText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && addText.trim()) handleAddNote();
+              }}
+              placeholder="Note text..."
+              maxLength={280}
+              className="w-full px-3 py-1.5 bg-stone-900/80 border border-stone-700/50 rounded-lg text-sm text-stone-200 placeholder:text-stone-600 focus:outline-none focus:border-amber-500/50"
+            />
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={addTsInput}
+                onChange={(e) => setAddTsInput(e.target.value)}
+                placeholder="h:mm AM/PM (optional, defaults to now)"
+                className="w-56 px-3 py-1.5 bg-stone-900/80 border border-stone-700/50 rounded-lg text-xs text-stone-200 placeholder:text-stone-600 focus:outline-none focus:border-amber-500/50"
+              />
+              {activeSession && (
+                <span className="text-xs text-stone-500 italic">
+                  Will be added to active session
+                </span>
+              )}
+              <div className="flex-1" />
+              <button
+                onClick={() => {
+                  setShowAddForm(false);
+                  setAddText("");
+                  setAddTsInput("");
+                }}
+                className="px-2.5 py-1 text-xs rounded bg-stone-700/50 text-stone-400 hover:bg-stone-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddNote}
+                disabled={!addText.trim()}
+                className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 text-sm font-medium hover:bg-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                <Icon path={ICONS.plus} size={14} /> Add
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Timeline */}
+      {isEmpty ? (
+        <div className="text-center py-12">
+          <p className="text-stone-500">No entries yet. Add a note or start tracking.</p>
+        </div>
+      ) : Object.keys(filtered).length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-stone-500">No results matching &quot;{search}&quot;</p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {Object.entries(filtered).map(([date, entries]) => {
+            // Track which sessions we've rendered cards for in this day group
+            const renderedSessions = new Set();
+
+            return (
+              <div key={date}>
+                {/* Day header */}
+                <div className="flex items-center gap-2 mb-3">
+                  <Icon path={ICONS.calendar} size={16} className="text-amber-400" />
+                  <span className="text-stone-300 text-sm font-medium">{date}</span>
+                </div>
+
+                <div className="space-y-2 ml-1">
+                  {entries.map((entry) => {
+                    // Session checkpoint
+                    if (entry.source === "session") {
+                      const isFirstOccurrence = !renderedSessions.has(entry.sessionId);
+                      if (isFirstOccurrence) renderedSessions.add(entry.sessionId);
+
+                      const isExpanded = expandedSessions.has(entry.sessionId);
+                      const sessionCheckpoints = entries.filter(
+                        (e) => e.source === "session" && e.sessionId === entry.sessionId
+                      );
+                      const cpCount = sessionCheckpoints.length;
+
+                      return (
+                        <div key={entry.id} className={isFirstOccurrence ? "" : "ml-6"}>
+                          {isFirstOccurrence && (
+                            <div className="bg-stone-800/60 border border-stone-700/50 rounded-xl p-3 space-y-2">
+                              {/* Session card header */}
+                              <div className="flex items-center gap-2">
+                                <Icon path={ICONS.clock} size={14} className="text-amber-400 shrink-0" />
+                                <span className="text-stone-200 font-medium text-sm truncate flex-1">
+                                  {entry.sessionTitle}
+                                </span>
+                                {entry.sessionStart && (
+                                  <span className="text-stone-400 text-xs shrink-0">
+                                    {formatTime(entry.sessionStart)}
+                                    {entry.sessionEnd ? ` – ${formatTime(entry.sessionEnd)}` : ""}
+                                  </span>
+                                )}
+                                {entry.sessionDuration > 0 && (
+                                  <span className="text-xs bg-stone-700/60 text-stone-300 px-1.5 py-0.5 rounded shrink-0">
+                                    {formatDuration(entry.sessionDuration)}
+                                  </span>
+                                )}
+                                <span className="text-xs bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded shrink-0">
+                                  {cpCount} {cpCount === 1 ? "note" : "notes"}
+                                </span>
+                                <button
+                                  onClick={() => toggleSession(entry.sessionId)}
+                                  className="p-0.5 rounded hover:bg-stone-700/50 text-stone-400 hover:text-stone-200 shrink-0"
+                                >
+                                  <Icon
+                                    path={isExpanded ? ICONS.chevronDown : ICONS.chevronRight}
+                                    size={14}
+                                  />
+                                </button>
+                              </div>
+
+                              {/* Expanded checkpoints */}
+                              {isExpanded && (
+                                <div className="space-y-1 pl-2">
+                                  {sessionCheckpoints.map((cp) => (
+                                    <div key={cp.id} className="group flex items-start gap-2 py-1">
+                                      <Icon path={ICONS.flag} size={12} className="text-amber-400 mt-1 shrink-0" />
+                                      {editingEntry && editingEntry.id === cp.id ? (
+                                        <div className="flex-1 space-y-1.5">
+                                          <input
+                                            type="text"
+                                            value={editingEntry.text}
+                                            onChange={(e) =>
+                                              setEditingEntry((prev) => ({ ...prev, text: e.target.value }))
+                                            }
+                                            className="w-full px-2 py-1 bg-stone-900/80 border border-stone-700/50 rounded text-xs text-stone-200 focus:outline-none focus:border-amber-500/50"
+                                          />
+                                          <div className="flex items-center gap-1.5">
+                                            <input
+                                              type="text"
+                                              value={editingEntry.tsInput}
+                                              onChange={(e) =>
+                                                setEditingEntry((prev) => ({ ...prev, tsInput: e.target.value }))
+                                              }
+                                              placeholder="h:mm AM/PM"
+                                              className="w-24 px-2 py-1 bg-stone-900/80 border border-stone-700/50 rounded text-xs text-stone-200 focus:outline-none focus:border-amber-500/50"
+                                            />
+                                            <button
+                                              onClick={handleSaveEdit}
+                                              className="px-2 py-1 text-xs rounded bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                                            >
+                                                              Save
+                                            </button>
+                                            <button
+                                              onClick={handleCancelEdit}
+                                              className="px-2 py-1 text-xs rounded bg-stone-700/50 text-stone-400 hover:bg-stone-700"
+                                            >
+                                              Cancel
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <div className="flex-1 min-w-0">
+                                            <span className="text-xs text-stone-400">{formatTime(cp.ts)}</span>
+                                            <p className="text-sm text-stone-200 break-words">{cp.text}</p>
+                                          </div>
+                                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                            <button
+                                              onClick={() => handleTogglePrivate(cp)}
+                                              className="p-0.5 rounded hover:bg-stone-700/50"
+                                              title={cp.private ? "Make visible" : "Make private"}
+                                            >
+                                              <Icon
+                                                path={cp.private ? ICONS.eyeOff : ICONS.eye}
+                                                size={12}
+                                                className={cp.private ? "text-stone-500" : "text-amber-400"}
+                                              />
+                                            </button>
+                                            <button
+                                              onClick={() => handleStartEdit(cp)}
+                                              className="p-0.5 rounded hover:bg-stone-700/50 text-stone-500 hover:text-stone-300"
+                                              title="Edit"
+                                            >
+                                              <Icon path={ICONS.edit} size={12} />
+                                            </button>
+                                            <button
+                                              onClick={() => handleDelete(cp)}
+                                              className="p-0.5 rounded hover:bg-stone-700/50 text-stone-500 hover:text-rose-400"
+                                              title="Delete"
+                                            >
+                                              <Icon path={ICONS.trash} size={12} />
+                                            </button>
+                                          </div>
+                                        </>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // Standalone entry
+                    return (
+                      <div key={entry.id} className="group flex items-start gap-2 py-1 opacity-55 hover:opacity-80 transition-opacity">
+                        <Icon path={ICONS.fileText} size={14} className="text-stone-500 mt-0.5 shrink-0" />
+                        {editingEntry && editingEntry.id === entry.id ? (
+                          <div className="flex-1 space-y-1.5">
+                            <input
+                              type="text"
+                              value={editingEntry.text}
+                              onChange={(e) =>
+                                setEditingEntry((prev) => ({ ...prev, text: e.target.value }))
+                              }
+                              className="w-full px-2 py-1 bg-stone-900/80 border border-stone-700/50 rounded text-xs text-stone-200 focus:outline-none focus:border-amber-500/50"
+                            />
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={editingEntry.tsInput}
+                                onChange={(e) =>
+                                  setEditingEntry((prev) => ({ ...prev, tsInput: e.target.value }))
+                                }
+                                placeholder="h:mm AM/PM"
+                                className="w-24 px-2 py-1 bg-stone-900/80 border border-stone-700/50 rounded text-xs text-stone-200 focus:outline-none focus:border-amber-500/50"
+                              />
+                              <button
+                                onClick={handleSaveEdit}
+                                className="px-2 py-1 text-xs rounded bg-amber-500/20 text-amber-400 hover:bg-amber-500/30"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={handleCancelEdit}
+                                className="px-2 py-1 text-xs rounded bg-stone-700/50 text-stone-400 hover:bg-stone-700"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs text-stone-400">{formatTime(entry.ts)}</span>
+                              <p className="text-sm text-stone-300 italic break-words">{entry.text}</p>
+                            </div>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                              <button
+                                onClick={() => handleTogglePrivate(entry)}
+                                className="p-0.5 rounded hover:bg-stone-700/50"
+                                title={entry.private ? "Make visible" : "Make private"}
+                              >
+                                <Icon
+                                  path={entry.private ? ICONS.eyeOff : ICONS.eye}
+                                  size={12}
+                                  className={entry.private ? "text-stone-500" : "text-amber-400"}
+                                />
+                              </button>
+                              <button
+                                onClick={() => handleStartEdit(entry)}
+                                className="p-0.5 rounded hover:bg-stone-700/50 text-stone-500 hover:text-stone-300"
+                                title="Edit"
+                              >
+                                <Icon path={ICONS.edit} size={12} />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(entry)}
+                                className="p-0.5 rounded hover:bg-stone-700/50 text-stone-500 hover:text-rose-400"
+                                title="Delete"
+                              >
+                                <Icon path={ICONS.trash} size={12} />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
