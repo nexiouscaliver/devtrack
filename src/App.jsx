@@ -752,7 +752,34 @@ function linkCommitsToSessions(sessions, commits) {
 
 export default function App() {
   // Load once and derive all initial state from it
-  const [initialData] = useState(() => load());
+  const [initialData] = useState(() => {
+    const loaded = load();
+    if (loaded) {
+      // Safety: auto-complete any running/paused session from a previous day
+      const todayStart = startOfDay(Date.now());
+      let changed = false;
+      loaded.sessions = loaded.sessions.map((s) => {
+        if ((s.status === "running" || s.status === "paused") && s.start < todayStart) {
+          changed = true;
+          const end = todayStart; // cap at midnight of current day
+          let pauses = s.pauses || [];
+          if (s.status === "paused" && pauses.length > 0) {
+            pauses = pauses.map((p, i) =>
+              i === pauses.length - 1 && p.end === null ? { ...p, end } : p,
+            );
+          }
+          const duration = end - s.start;
+          const totalBreakTime = pauses.reduce((sum, p) => sum + ((p.end || end) - p.start), 0);
+          return { ...s, end, duration, totalWorkTime: duration - totalBreakTime, totalBreakTime, pauses, status: "completed" };
+        }
+        return s;
+      });
+      if (changed) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded)); } catch { /* non-critical */ }
+      }
+    }
+    return loaded;
+  });
   const [data, setData] = useState(() => initialData || DEFAULT_DATA);
   const [now, setNow] = useState(() => Date.now());
   const [view, setView] = useState(() => initialData?.ui?.view || "dashboard");
