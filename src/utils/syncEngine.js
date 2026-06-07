@@ -19,6 +19,10 @@ function commitKey(c) {
   return `${c.sha}::${c.repo}::${c.timestamp}`;
 }
 
+function workLogKey(w) {
+  return w.id;
+}
+
 // ─── Field-level diff helpers ────────────────────────────────────────────────
 
 function diffFields(localObj, serverObj) {
@@ -169,30 +173,40 @@ export function computeDiff(localData, serverData) {
     commitKey
   );
 
+  const workLog = diffArrays(
+    localData?.workLog || [],
+    serverData?.workLog || [],
+    workLogKey
+  );
+
   const settings = diffSettings(localData?.settings || {}, serverData?.settings || {});
 
   const ui = diffUi(localData?.ui || {}, serverData?.ui || {});
 
-  // Counts for array items only (sessions + commits)
+  // Counts for array items only (sessions + commits + workLog)
   const localOnlyCount =
     sessions.localOnly.length +
-    commits.localOnly.length;
+    commits.localOnly.length +
+    workLog.localOnly.length;
 
   const serverOnlyCount =
     sessions.serverOnly.length +
-    commits.serverOnly.length;
+    commits.serverOnly.length +
+    workLog.serverOnly.length;
 
   const conflictCount =
     sessions.conflicts.length +
     commits.conflicts.length +
+    workLog.conflicts.length +
     settings.conflicts.length +
     ui.conflicts.length;
 
-  const identicalCount = sessions.identicalItems.length + commits.identicalItems.length;
+  const identicalCount = sessions.identicalItems.length + commits.identicalItems.length + workLog.identicalItems.length;
 
   return {
     sessions,
     commits,
+    workLog,
     settings,
     ui,
     summary: {
@@ -202,8 +216,8 @@ export function computeDiff(localData, serverData) {
       identicalCount,
       settingsDiffs: settings.conflicts.length,
       uiDiffs: ui.conflicts.length,
-      localTotal: (localData?.sessions || []).length + (localData?.commits || []).length,
-      serverTotal: (serverData?.sessions || []).length + (serverData?.commits || []).length,
+      localTotal: (localData?.sessions || []).length + (localData?.commits || []).length + (localData?.workLog || []).length,
+      serverTotal: (serverData?.sessions || []).length + (serverData?.commits || []).length + (serverData?.workLog || []).length,
     },
   };
 }
@@ -221,6 +235,7 @@ export function applyPull(serverData) {
 export function applyMerge(localData, serverData, diffResult, resolutions) {
   const sessionResolutions = resolutions?.sessions || {};
   const commitResolutions = resolutions?.commits || {};
+  const workLogResolutions = resolutions?.workLog || {};
   const settingsResolution = resolutions?.settings || {};
   const uiResolution = resolutions?.ui || {};
 
@@ -242,6 +257,16 @@ export function applyMerge(localData, serverData, diffResult, resolutions) {
       commitResolutions[c.id] === "server" ? c.server : c.local
     ),
     ...diffResult.commits.identicalItems,
+  ];
+
+  // WorkLog: same union approach
+  const mergedWorkLog = [
+    ...diffResult.workLog.localOnly,
+    ...diffResult.workLog.serverOnly,
+    ...diffResult.workLog.conflicts.map((c) =>
+      workLogResolutions[c.id] === "server" ? c.server : c.local
+    ),
+    ...diffResult.workLog.identicalItems,
   ];
 
   // Settings: pick resolved values or keep local (as base) for non-conflicting fields
@@ -266,6 +291,7 @@ export function applyMerge(localData, serverData, diffResult, resolutions) {
   return {
     sessions: mergedSessions,
     commits: mergedCommits,
+    workLog: mergedWorkLog,
     settings: mergedSettings,
     ui: mergedUi,
   };
@@ -285,6 +311,11 @@ export function previewSync(strategy, localData, serverData, diffResult, resolut
     if (diffResult.summary.serverOnlyCount > 0) {
       description.push(
         `⚠ ${diffResult.commits.serverOnly.length} server-only commit(s) and ${diffResult.sessions.serverOnly.length} server-only session(s) will be lost.`
+      );
+    }
+    if (diffResult.workLog.serverOnly.length > 0) {
+      description.push(
+        `⚠ ${diffResult.workLog.serverOnly.length} server-only work log entry/entries will be lost.`
       );
     }
     if (diffResult.summary.settingsDiffs > 0) {
@@ -321,6 +352,11 @@ export function previewSync(strategy, localData, serverData, diffResult, resolut
     if (diffResult.summary.localOnlyCount > 0) {
       description.push(
         `⚠ ${diffResult.sessions.localOnly.length} local-only session(s) and ${diffResult.commits.localOnly.length} local-only commit(s) will be lost.`
+      );
+    }
+    if (diffResult.workLog.localOnly.length > 0) {
+      description.push(
+        `⚠ ${diffResult.workLog.localOnly.length} local-only work log entry/entries will be lost.`
       );
     }
     if (diffResult.summary.settingsDiffs > 0) {
@@ -360,6 +396,12 @@ export function previewSync(strategy, localData, serverData, diffResult, resolut
   );
   description.push(
     `✓ ${diffResult.commits.serverOnly.length} server-only commit(s) added.`
+  );
+  description.push(
+    `✓ ${diffResult.workLog.localOnly.length} local-only work log entry/entries added.`
+  );
+  description.push(
+    `✓ ${diffResult.workLog.serverOnly.length} server-only work log entry/entries added.`
   );
 
   const sessionConflicts = diffResult.sessions.conflicts.length;

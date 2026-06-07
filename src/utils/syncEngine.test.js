@@ -50,6 +50,7 @@ function makeData(overrides = {}) {
   return {
     sessions: [],
     commits: [],
+    workLog: [],
     settings: {
       dailyGoal: 8,
       trackedRepos: [],
@@ -286,5 +287,59 @@ describe("formatDiffSummary", () => {
     const diff = computeDiff(local, server);
     const lines = formatDiffSummary(diff);
     expect(lines.some((l) => l.includes("conflict"))).toBe(true);
+  });
+});
+
+// ─── workLog support ────────────────────────────────────────────────────────
+
+describe("workLog support", () => {
+  function makeWorkLog(overrides = {}) {
+    return {
+      id: "w1",
+      text: "Working on feature X",
+      ts: "2026-06-01T10:00:00.000Z",
+      private: false,
+      ...overrides,
+    };
+  }
+
+  it("detects local-only workLog entries", () => {
+    const local = makeData({ workLog: [makeWorkLog()] });
+    const server = makeData();
+    const diff = computeDiff(local, server);
+    expect(diff.workLog.localOnly).toHaveLength(1);
+    expect(diff.summary.localOnlyCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("detects server-only workLog entries", () => {
+    const local = makeData();
+    const server = makeData({ workLog: [makeWorkLog()] });
+    const diff = computeDiff(local, server);
+    expect(diff.workLog.serverOnly).toHaveLength(1);
+    expect(diff.summary.serverOnlyCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("detects workLog conflicts", () => {
+    const local = makeData({ workLog: [makeWorkLog({ text: "local version" })] });
+    const server = makeData({ workLog: [makeWorkLog({ text: "server version" })] });
+    const diff = computeDiff(local, server);
+    expect(diff.workLog.conflicts).toHaveLength(1);
+  });
+
+  it("merges workLog entries from both sides", () => {
+    const local = makeData({ workLog: [makeWorkLog({ id: "w1" })] });
+    const server = makeData({ workLog: [makeWorkLog({ id: "w2" })] });
+    const diff = computeDiff(local, server);
+    const result = applyMerge(local, server, diff, {});
+    expect(result.workLog).toHaveLength(2);
+  });
+
+  it("includes workLog in applyMerge result", () => {
+    const local = makeData({ workLog: [makeWorkLog()] });
+    const server = makeData({ workLog: [] });
+    const diff = computeDiff(local, server);
+    const result = applyMerge(local, server, diff, {});
+    expect(result.workLog).toBeDefined();
+    expect(result.workLog).toHaveLength(1);
   });
 });
