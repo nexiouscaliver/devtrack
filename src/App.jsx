@@ -616,36 +616,39 @@ export default function App() {
     };
   }, [data, syncOpen]);
 
-  // Force-save on page unload using sendBeacon for the server leg
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (!pendingSaveRef.current) return;
-      clearTimeout(saveTimer.current);
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dataRef.current)); } catch {}
-      try {
-        navigator.sendBeacon?.(
-          "/api/data",
-          new Blob([JSON.stringify({ data: dataRef.current })], { type: "application/json" }),
-        );
-      } catch {}
-      pendingSaveRef.current = false;
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  // Force-save on page close / tab switch — single shared handler for both events.
+  // visibilitychange fires first (hidden), beforeunload fires next on actual close.
+  // We save localStorage synchronously + fire a keepalive fetch for the server backup.
+  // The handler is idempotent: after the first call, pendingSaveRef is cleared.
+  const forceSaveIfNeeded = useCallback(() => {
+    if (!pendingSaveRef.current) return;
+    clearTimeout(saveTimer.current);
+    const d = dataRef.current;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {}
+    // fetch with keepalive survives page teardown (up to 256 KB) and Express parses it correctly
+    try {
+      fetch("/api/data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: d }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {}
+    pendingSaveRef.current = false;
   }, []);
 
-  // Save when tab becomes hidden (covers minimise, switch tab, etc.)
+  useEffect(() => {
+    window.addEventListener("beforeunload", forceSaveIfNeeded);
+    return () => window.removeEventListener("beforeunload", forceSaveIfNeeded);
+  }, [forceSaveIfNeeded]);
+
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden" && pendingSaveRef.current) {
-        clearTimeout(saveTimer.current);
-        save(dataRef.current);
-        pendingSaveRef.current = false;
-      }
+      if (document.visibilityState === "hidden") forceSaveIfNeeded();
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, []);
+  }, [forceSaveIfNeeded]);
 
   // Persist UI preferences alongside data (piggybacks on existing debounce + server save)
   const updateUi = (updates) => {
@@ -681,7 +684,8 @@ export default function App() {
       });
 
     const mountHash = JSON.stringify(data);
-    const localWasNull = !load(); // detect corrupted/empty localStorage
+    // initialData was captured during first useState — reuse it to avoid redundant load()
+    const localWasNull = !initialData;
 
     loadFromServer().then((serverData) => {
       // Corruption recovery: if localStorage was empty/corrupt but server has data, restore from server
@@ -733,8 +737,8 @@ export default function App() {
   useEffect(() => {
     const handleStorageChange = (e) => {
       if (e.key !== STORAGE_KEY || !e.newValue) return;
-      if (pendingSaveRef.current) {
-        // We have unsaved changes that conflict with the incoming data
+      // Only warn if the debounced save timer is still ticking (genuine unsaved change)
+      if (saveTimer.current) {
         showToast("Another tab modified your data — your unsaved changes may conflict.", "warning");
       } else {
         // No pending local changes — safely adopt the other tab's data
@@ -1183,7 +1187,9 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-stone-950 text-stone-100 font-sans flex" inert={syncOpen || undefined}>
+    <div className="min-h-screen bg-stone-950 text-stone-100 font-sans">
+      {/* App content — inerted during sync to prevent edits underneath the modal */}
+      <div className="min-h-screen flex" inert={syncOpen || undefined}>
       {/* Warm ambient gradient */}
       <div className="fixed inset-0 pointer-events-none bg-gradient-to-br from-amber-950/20 via-transparent to-orange-950/10" />
       {/* Mobile header bar */}
@@ -1427,6 +1433,7 @@ export default function App() {
           </motion.div>
         </AnimatePresence>
       </main>
+      </div>{/* end inerted content wrapper */}
 
       <SettingsModal
         key={settingsOpen ? "open" : "closed"}
