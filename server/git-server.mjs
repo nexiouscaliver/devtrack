@@ -318,7 +318,11 @@ app.post("/api/data", (req, res) => {
     if (data.sessions.length > 10000 || data.commits.length > 10000) {
       return res.status(400).json({ error: "Data arrays exceed maximum length" });
     }
-    writeQueue = writeQueue.then(() => writeDataFile(data));
+    writeQueue = writeQueue
+      .then(() => writeDataFile(data))
+      .catch((err) => {
+        console.error("DevTrack: write queue error, recovered:", err.message);
+      });
     res.json({ ok: true });
   } catch (err) {
     console.error("DevTrack: failed to write data file:", err.message);
