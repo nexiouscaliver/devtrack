@@ -32,7 +32,7 @@ server/data/
 
 # Dev tools (not part of the app)
 scripts/
-docs/
+docs/superpowers/
 claudedocs/
 .playwright-mcp/
 timer-before.png
