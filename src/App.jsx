@@ -884,6 +884,7 @@ export default function App() {
   });
   // eslint-disable-next-line no-unused-vars
   const [graceEnd, setGraceEnd] = useState(null);
+  const [graceRemaining, setGraceRemaining] = useState(null);
   const pomodoroTargetRef = useRef(pomodoroTarget);
   const pomodoroPhaseRef = useRef(pomodoroPhase);
   // Keep refs in sync via effect (avoids writing during render)
@@ -1128,15 +1129,6 @@ export default function App() {
     return () => window.removeEventListener("storage", handleStorageChange);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Timer tick — update every second while session is active (running or paused)
-  useEffect(() => {
-    if (!activeSession || activeSession.status === "completed") return;
-    const tick = () => setElapsed(computeElapsed(activeSession));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [activeSession]);
 
   // Keep `now` fresh so dashboard stats, streak, and weekly chart stay accurate
   useEffect(() => {
@@ -1398,7 +1390,50 @@ export default function App() {
     }
   }, [pomodoroNotify, transitionPomodoroPhase]);
 
-  // --- Skip current break (end break session, go to prompt for next work) ---
+  // Timer tick — update every second while session is active (running or paused)
+  useEffect(() => {
+    if (!activeSession || activeSession.status === "completed") return;
+    const tick = () => {
+      setElapsed(computeElapsed(activeSession));
+
+      // Pomodoro countdown check
+      const phase = pomodoroPhaseRef.current;
+      if (phase === "work") {
+        const target = pomodoroTargetRef.current;
+        if (target) {
+          const pauses = activeSession.pauses || [];
+          const completedPauseTime = pauses
+            .filter((p) => p.end !== null)
+            .reduce((sum, p) => sum + (p.end - p.start), 0);
+          const effectiveNow =
+            activeSession.status === "paused" && pauses.length > 0
+              ? pauses[pauses.length - 1].start
+              : Date.now();
+          const workElapsed = Math.max(0, effectiveNow - activeSession.start - completedPauseTime);
+          if (workElapsed >= target) {
+            handlePomodoroIntervalComplete();
+          }
+        }
+      } else if (phase === "break") {
+        const target = pomodoroTargetRef.current;
+        if (target && computeElapsed(activeSession) >= target) {
+          handlePomodoroIntervalComplete();
+        }
+      } else if (phase === "grace") {
+        const end = graceEnd;
+        if (end && Date.now() >= end) {
+          // Grace expired — auto-start break using the atomic function
+          startBreakNow();
+        }
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSession, handlePomodoroIntervalComplete, startBreakNow, graceEnd]);
+
+    // --- Skip current break (end break session, go to prompt for next work) ---
   // eslint-disable-next-line no-unused-vars
   const skipBreak = useCallback(() => {
     if (pomodoroPhaseRef.current !== "break" && pomodoroPhaseRef.current !== "grace") return;
@@ -2154,6 +2189,17 @@ export default function App() {
                 deleteCheckpoint={deleteCheckpoint}
                 data={data}
                 showToast={showToast}
+                pomodoroPhase={pomodoroPhase}
+                pomodoroCycle={pomodoroCycle}
+                pomodoroTarget={pomodoroTarget}
+                pomodoroElapsed={pomodoroElapsed}
+                timerMode={data.ui?.timerMode || "free"}
+                graceRemaining={graceRemaining}
+                setTimerMode={setTimerMode}
+                skipBreak={skipBreak}
+                extendWork={extendWork}
+                startPomodoro={startPomodoro}
+                startBreakNow={startBreakNow}
               />
             )}
             {view === "sessions" && (
