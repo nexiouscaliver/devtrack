@@ -249,6 +249,19 @@ const ICONS = {
       <line x1="4" y1="22" x2="4" y2="15" />
     </>
   ),
+  forward: (
+    <>
+      <polygon points="5 4 15 12 5 20 5 4" />
+      <line x1="19" y1="5" x2="19" y2="19" />
+    </>
+  ),
+  skipForward: (
+    <>
+      <polygon points="5 4 15 12 5 20 5 4" />
+      <line x1="19" y1="5" x2="19" y2="19" />
+      <line x1="15" y1="5" x2="15" y2="19" />
+    </>
+  ),
 };
 
 // Helpers
@@ -428,6 +441,12 @@ const DEFAULT_DATA = {
       identities: [],
       autoDetected: null,
     },
+    pomodoro: {
+      workInterval: 25,
+      breakInterval: 5,
+      autoStartBreak: true,
+      notifications: true,
+    },
   },
   ui: {
     view: "dashboard",
@@ -438,6 +457,7 @@ const DEFAULT_DATA = {
     exportFormat: "xlsx",
     exportIncludeCheckpoints: true,
     exportIncludeWorkLog: true,
+    timerMode: "free",
   },
 };
 
@@ -504,6 +524,16 @@ function sanitizeData(data) {
         identities: [],
         autoDetected: null,
       },
+      pomodoro: {
+        workInterval: typeof data.settings?.pomodoro?.workInterval === "number"
+          ? Math.max(1, Math.min(120, data.settings.pomodoro.workInterval))
+          : 25,
+        breakInterval: typeof data.settings?.pomodoro?.breakInterval === "number"
+          ? Math.max(1, Math.min(60, data.settings.pomodoro.breakInterval))
+          : 5,
+        autoStartBreak: data.settings?.pomodoro?.autoStartBreak ?? true,
+        notifications: data.settings?.pomodoro?.notifications ?? true,
+      },
     },
     ui: { ...DEFAULT_DATA.ui, ...(data.ui || {}) },
     workLog: (Array.isArray(data.workLog) ? data.workLog : []).map((e) => ({
@@ -558,6 +588,19 @@ function migrate(parsed) {
   if (!parsed.workLog) {
     parsed.workLog = [];
   }
+
+  // Add pomodoro settings if missing
+  if (!parsed.settings.pomodoro) {
+    parsed.settings.pomodoro = {
+      workInterval: 25,
+      breakInterval: 5,
+      autoStartBreak: true,
+      notifications: true,
+    };
+  }
+  // Add timerMode UI pref if missing
+  if (!parsed.ui) parsed.ui = {};
+  if (!parsed.ui.timerMode) parsed.ui.timerMode = "free";
 
   return parsed;
 }
