@@ -605,10 +605,13 @@ app.delete("/api/data/versions", (_req, res) => {
 
 // --- SPA fallback: serve index.html for all non-API GET requests ---
 // Uses middleware (not app.get("*")) because Express 5's path-to-regexp v8
-// requires named wildcards. Middleware placed after all API routes catches
-// only requests that fell through — same effect as a catch-all route.
+// requires named wildcards. Only responds to GET requests — non-GET methods
+// to unknown paths receive a 404 (correct HTTP semantics).
 if (existsSync(DIST_DIR)) {
-  app.use((req, res) => {
+  app.use((req, res, next) => {
+    if (req.method !== "GET") {
+      return res.status(404).send("Not Found");
+    }
     res.sendFile(join(DIST_DIR, "index.html"), (err) => {
       if (err) {
         console.error("DevTrack: failed to serve SPA fallback:", err.message);

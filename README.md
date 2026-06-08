@@ -216,7 +216,7 @@ DevTrack takes security seriously even though it runs entirely locally:
 - **Path traversal prevention** — all paths validated, `..` sequences rejected
 - **Shell escaping** — `shEscape()` wraps all git command arguments
 - **Read-only git operations** — no push, pull, checkout, or mutating git commands
-- **No remote access** — server binds to `127.0.0.1` only
+- **No remote access** — server binds to `127.0.0.1` only (in development mode)
 - **Size limits** — 5MB request limit, 10,000 item array caps
 - **Private note filtering** — private content excluded from all exports
 

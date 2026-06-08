@@ -8,6 +8,8 @@ services:
       - "${DEVTRACK_PORT:-9000}:9000"
     volumes:
       # Data persistence — sessions, settings, version snapshots
+      # On Linux hosts, ensure the directory is writable by UID 1000:
+      #   mkdir -p ./devtrack-data && chown 1000:1000 ./devtrack-data
       - ./devtrack-data:/app/server/data
       # ──────────────────────────────────────────────────────
       # Git repository tracking (optional)
