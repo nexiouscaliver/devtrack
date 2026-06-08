@@ -252,6 +252,26 @@ const ICONS = {
   ),
 };
 
+// Calendar intensity helpers (module scope — no closure over component state)
+const CALENDAR_INTENSITY_CLASSES = {
+  peak: "bg-amber-500/50",
+  intense: "bg-amber-600/50",
+  strong: "bg-amber-700/50",
+  medium: "bg-amber-800/50",
+  light: "bg-amber-900/40",
+  none: "bg-stone-800/30",
+};
+const getCalendarIntensity = (totalWorkMs) => {
+  const hours = (totalWorkMs || 0) / 3600000;
+  if (hours >= 8) return "peak";
+  if (hours >= 6) return "intense";
+  if (hours >= 4) return "strong";
+  if (hours >= 2) return "medium";
+  if (hours > 0)  return "light";
+  return "none";
+};
+const formatCalendarHours = (ms) => (ms / 3600000).toFixed(1) + "h";
+
 // Helpers
 const formatDuration = (ms) => {
   if (!ms || ms < 0) ms = 0;
@@ -4045,10 +4065,8 @@ function CalendarView({ data, activeSession, elapsed, now }) {
     setSelectedDay(startOfDay(Date.now()));
   };
 
-  const viewingCurrentMonth = () => {
-    const d = new Date();
-    return year === d.getFullYear() && month === d.getMonth();
-  };
+  const viewingCurrentMonth = year === new Date(now).getFullYear()
+    && month === new Date(now).getMonth();
 
   const monthLabel = new Date(year, month).toLocaleDateString("en", { month: "long", year: "numeric" });
 
@@ -4090,27 +4108,6 @@ function CalendarView({ data, activeSession, elapsed, now }) {
   const todayLiveWork = hasActiveToday && activeSession.type === "work"
     ? (sessionsByDay[todayKey]?.totalWork || 0) + elapsed
     : (sessionsByDay[todayKey]?.totalWork || 0);
-
-  const getIntensity = (totalWorkMs) => {
-    const hours = (totalWorkMs || 0) / 3600000;
-    if (hours >= 8) return "peak";
-    if (hours >= 6) return "intense";
-    if (hours >= 4) return "strong";
-    if (hours >= 2) return "medium";
-    if (hours > 0)  return "light";
-    return "none";
-  };
-
-  const INTENSITY_CLASSES = {
-    peak: "bg-amber-500/50",
-    intense: "bg-amber-600/50",
-    strong: "bg-amber-700/50",
-    medium: "bg-amber-800/50",
-    light: "bg-amber-900/40",
-    none: "bg-stone-800/30",
-  };
-
-  const formatHours = (ms) => (ms / 3600000).toFixed(1) + "h";
 
   const getRowForDay = (dayTs) => {
     const dayDate = new Date(dayTs);
@@ -4173,11 +4170,11 @@ function CalendarView({ data, activeSession, elapsed, now }) {
         <button
           onClick={goToToday}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            viewingCurrentMonth()
+            viewingCurrentMonth
               ? "bg-stone-800 text-stone-500 cursor-default"
               : "bg-stone-800 text-stone-300 hover:bg-stone-700 hover:text-white"
           }`}
-          disabled={viewingCurrentMonth()}
+          disabled={viewingCurrentMonth}
         >
           Today
         </button>
@@ -4226,7 +4223,7 @@ function CalendarView({ data, activeSession, elapsed, now }) {
                     const dayData = sessionsByDay[dayTs];
                     const isTodayCell = isToday(dayTs);
                     const dayTotalWork = isTodayCell ? todayLiveWork : (dayData?.totalWork || 0);
-                    const intensity = getIntensity(dayTotalWork);
+                    const intensity = getCalendarIntensity(dayTotalWork);
                     const isSelected = selectedDay === dayTs;
                     const hasActiveSession = activeSession && isTodayCell && (activeSession.status === "running" || activeSession.status === "paused");
 
@@ -4235,8 +4232,9 @@ function CalendarView({ data, activeSession, elapsed, now }) {
                         key={cellIndex}
                         role="button"
                         tabIndex={0}
-                        aria-label={`${new Date(dayTs).toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}${dayTotalWork > 0 ? `, ${formatHours(dayTotalWork)} work` : ""}`}
-                        className={`group relative aspect-square rounded-lg p-1 md:p-2 cursor-pointer transition-all ${INTENSITY_CLASSES[intensity]} hover:ring-1 hover:ring-amber-400/50 focus:outline-none focus:ring-2 focus:ring-amber-400/70 ${
+                        aria-label={`${new Date(dayTs).toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}${dayTotalWork > 0 ? `, ${formatCalendarHours(dayTotalWork)} work` : ""}`}
+                        aria-expanded={isSelected}
+                        className={`group relative aspect-square rounded-lg p-1 md:p-2 cursor-pointer transition-all ${CALENDAR_INTENSITY_CLASSES[intensity]} hover:ring-1 hover:ring-amber-400/50 focus:outline-none focus:ring-2 focus:ring-amber-400/70 ${
                           isTodayCell && !isSelected ? "ring-2 ring-amber-400 ring-offset-1 ring-offset-stone-950" : ""
                         } ${
                           isSelected ? "ring-2 ring-amber-300 ring-offset-1 ring-offset-stone-950" : ""
@@ -4258,7 +4256,7 @@ function CalendarView({ data, activeSession, elapsed, now }) {
                         {/* Hover tooltip */}
                         {dayTotalWork > 0 && (
                           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-stone-900 border border-stone-700 rounded-lg text-xs text-stone-300 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none shadow-lg">
-                            <div className="font-medium">{formatHours(dayTotalWork)} work</div>
+                            <div className="font-medium">{formatCalendarHours(dayTotalWork)} work</div>
                             <div className="text-stone-500">{(dayData?.sessions?.length || 0) + (hasActiveSession ? 1 : 0)} session{(dayData?.sessions?.length || 0) + (hasActiveSession ? 1 : 0) !== 1 ? "s" : ""}</div>
                           </div>
                         )}
@@ -4300,18 +4298,23 @@ function CalendarDayDetail({ dayTs, sessions, activeSession, elapsed }) {
   const dateLabel = new Date(dayTs).toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" });
   const isTodaySelected = isToday(dayTs);
 
-  const totalWork = sessions
-    .filter(s => s.type === "work")
-    .reduce((a, s) => a + (s.totalWorkTime || s.duration || 0), 0);
-
   // Merge active session into list if it's today
   const allSessions = [...sessions];
-  if (activeSession && isTodaySelected && (activeSession.status === "running" || activeSession.status === "paused")) {
+  const hasActiveMerge = activeSession && isTodaySelected && (activeSession.status === "running" || activeSession.status === "paused");
+  if (hasActiveMerge) {
     const alreadyIncluded = sessions.some(s => s.id === activeSession.id);
     if (!alreadyIncluded) {
       allSessions.push({ ...activeSession, duration: elapsed });
     }
   }
+
+  const totalWork = allSessions
+    .filter(s => s.type === "work")
+    .reduce((a, s) => {
+      if (activeSession && s.id === activeSession.id) return a + (s.status === "paused" ? (s.totalWorkTime || elapsed) : elapsed);
+      return a + (s.totalWorkTime || s.duration || 0);
+    }, 0);
+
   const sortedSessions = [...allSessions].sort((a, b) => a.start - b.start);
 
   return (
