@@ -797,6 +797,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [quotaWarning, setQuotaWarning] = useState(false);
   const [serverStatus, setServerStatus] = useState("connected"); // connected | disconnected
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const serverStatusRef = useRef("connected");
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef(null);
@@ -914,6 +915,30 @@ export default function App() {
   const dataRef = useRef(data);
   // eslint-disable-next-line react-hooks/immutability
   useEffect(() => { dataRef.current = data; }, [data]);
+
+  // Refs for keyboard listener — read current state without re-registering the listener
+  const activeSessionRef = useRef(activeSession);
+  useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
+
+  const settingsOpenRef = useRef(settingsOpen);
+  useEffect(() => { settingsOpenRef.current = settingsOpen; }, [settingsOpen]);
+
+  const syncOpenRef = useRef(syncOpen);
+  useEffect(() => { syncOpenRef.current = syncOpen; }, [syncOpen]);
+
+  const mobileMenuOpenRef = useRef(mobileMenuOpen);
+  useEffect(() => { mobileMenuOpenRef.current = mobileMenuOpen; }, [mobileMenuOpen]);
+
+  const shortcutHelpOpenRef = useRef(shortcutHelpOpen);
+  useEffect(() => { shortcutHelpOpenRef.current = shortcutHelpOpen; }, [shortcutHelpOpen]);
+
+  // Function refs for keyboard listener — initialized null, synced after declarations
+  const startSessionRef = useRef(null);
+  const pauseSessionRef = useRef(null);
+  const resumeSessionRef = useRef(null);
+  const stopSessionRef = useRef(null);
+  const changeViewRef = useRef(null);
+
   useEffect(() => {
     if (serverSynced.current) return;
     serverSynced.current = true;
@@ -1072,6 +1097,70 @@ export default function App() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession?.id, activeSession?.status]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    // Navigation view IDs — must match the `nav` array in App()
+    const navIds = ["dashboard", "timer", "sessions", "git", "analytics", "worklog", "export"];
+
+    const handleKeyDown = (e) => {
+      // Guard: suppress shortcuts when typing in input fields
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
+
+      // Escape: close topmost modal/overlay (priority order)
+      if (e.key === "Escape") {
+        if (shortcutHelpOpenRef.current) {
+          setShortcutHelpOpen(false);
+          e.preventDefault();
+        } else if (settingsOpenRef.current) {
+          setSettingsOpen(false);
+          e.preventDefault();
+        } else if (syncOpenRef.current) {
+          setSyncOpen(false);
+          e.preventDefault();
+        } else if (mobileMenuOpenRef.current) {
+          setMobileMenuOpen(false);
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // Alt+key shortcuts
+      if (!e.altKey) return;
+
+      if (e.key === "s" || e.key === "S") {
+        if (startSessionRef.current) startSessionRef.current("work");
+        e.preventDefault();
+      } else if (e.key === "p" || e.key === "P") {
+        const session = activeSessionRef.current;
+        if (session && (session.status === "running" || session.status === "paused")) {
+          if (session.status === "running") {
+            if (pauseSessionRef.current) pauseSessionRef.current();
+          } else {
+            if (resumeSessionRef.current) resumeSessionRef.current();
+          }
+          e.preventDefault();
+        }
+      } else if (e.key === "x" || e.key === "X") {
+        const session = activeSessionRef.current;
+        if (session && (session.status === "running" || session.status === "paused")) {
+          if (stopSessionRef.current) stopSessionRef.current();
+          e.preventDefault();
+        }
+      } else if (e.key >= "1" && e.key <= "7") {
+        const viewIndex = parseInt(e.key, 10) - 1;
+        if (changeViewRef.current) changeViewRef.current(navIds[viewIndex]);
+        e.preventDefault();
+      } else if (e.key === "/") {
+        setShortcutHelpOpen((v) => !v);
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const toastTimer = useRef(null);
 
@@ -1270,6 +1359,13 @@ export default function App() {
       return null;
     });
   }, [showToast]);
+
+  // Sync function refs for keyboard listener (declared above, populated now)
+  useEffect(() => { startSessionRef.current = startSession; }, [startSession]);
+  useEffect(() => { pauseSessionRef.current = pauseSession; }, [pauseSession]);
+  useEffect(() => { resumeSessionRef.current = resumeSession; }, [resumeSession]);
+  useEffect(() => { stopSessionRef.current = stopSession; }, [stopSession]);
+  useEffect(() => { changeViewRef.current = changeView; }, [changeView]);
 
   const deleteSession = (id) => {
     setData((d) => ({ ...d, sessions: d.sessions.filter((s) => s.id !== id) }));
@@ -1870,6 +1966,10 @@ export default function App() {
         localData={data}
         applySyncResult={applySyncResult}
         showToast={showToast}
+      />
+      <ShortcutHelpOverlay
+        open={shortcutHelpOpen}
+        onClose={() => setShortcutHelpOpen(false)}
       />
       <Toast toast={toast} />
 
@@ -4721,16 +4821,6 @@ function SettingsModal({ open, onClose, data, updateSettings, showToast, onReset
   const [newIdentityName, setNewIdentityName] = useState("");
   const [newIdentityEmail, setNewIdentityEmail] = useState("");
 
-  // Sync form when modal opens and handle Escape key
-  useEffect(() => {
-    if (!open) return;
-    const handleKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [open, onClose]);
-
   if (!open) return null;
 
   const gitAuthors = form.gitAuthors || { identities: [], autoDetected: null };
@@ -4953,6 +5043,90 @@ function SettingsModal({ open, onClose, data, updateSettings, showToast, onReset
   );
 }
 
+// ============ KEYBOARD SHORTCUT HELP OVERLAY ============
+function ShortcutHelpOverlay({ open, onClose }) {
+  const sections = [
+    {
+      title: "Timer",
+      shortcuts: [
+        { keys: "Alt+S", desc: "Start work session" },
+        { keys: "Alt+P", desc: "Pause / Resume" },
+        { keys: "Alt+X", desc: "Stop session" },
+      ],
+    },
+    {
+      title: "Navigation",
+      shortcuts: [
+        { keys: "Alt+1", desc: "Dashboard" },
+        { keys: "Alt+2", desc: "Timer" },
+        { keys: "Alt+3", desc: "Sessions" },
+        { keys: "Alt+4", desc: "Git Tracking" },
+        { keys: "Alt+5", desc: "Analytics" },
+        { keys: "Alt+6", desc: "Work Log" },
+        { keys: "Alt+7", desc: "Export" },
+      ],
+    },
+    {
+      title: "General",
+      shortcuts: [
+        { keys: "Alt+/", desc: "Toggle this help" },
+        { keys: "Esc", desc: "Close modal / overlay" },
+      ],
+    },
+  ];
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Keyboard Shortcuts"
+            className="bg-stone-900 border border-stone-800 rounded-2xl p-6 w-full max-w-md"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold">Keyboard Shortcuts</h3>
+              <button onClick={onClose} className="text-stone-400 hover:text-white" aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <div className="space-y-5">
+              {sections.map((section) => (
+                <div key={section.title}>
+                  <h4 className="text-xs text-stone-400 uppercase tracking-wide mb-2">{section.title}</h4>
+                  <div className="space-y-1.5">
+                    {section.shortcuts.map((s) => (
+                      <div key={s.keys} className="flex items-center justify-between">
+                        <span className="text-sm text-stone-300">{s.desc}</span>
+                        <kbd className="px-2 py-1 bg-stone-800 border border-stone-700 rounded text-xs font-mono text-amber-400">
+                          {s.keys}
+                        </kbd>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 // ============ TOAST ============
 function Toast({ toast }) {
   return (
@@ -4993,16 +5167,6 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
   const [expandedSections, setExpandedSections] = useState({});
   const [showVersions, setShowVersions] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(null);
-
-  // Escape key handler
-  useEffect(() => {
-    if (!open) return;
-    const handleKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [open, onClose]);
 
   // Kick off diff computation when modal opens
   useEffect(() => {
