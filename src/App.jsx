@@ -846,6 +846,65 @@ export default function App() {
   const pendingSaveRef = useRef(false);
   const saveTimer = useRef(null);
 
+  // --- Pomodoro state ---
+  // pomodoroCycle is derived from sessions (auto-resets on new day)
+  // eslint-disable-next-line no-unused-vars
+  const pomodoroCycle = useMemo(() => {
+    return (data.sessions || []).filter(
+      (s) => isToday(s.start) && s.status === "completed" && s.type === "work" && (s.tags || []).includes("pomodoro"),
+    ).length;
+  }, [data.sessions]);
+  // eslint-disable-next-line no-unused-vars
+  const [pomodoroPhase, setPomodoroPhase] = useState(() => {
+    const timerMode = initialData?.ui?.timerMode;
+    if (timerMode !== "pomodoro") return null;
+    const running = (initialData?.sessions || []).find(
+      (s) => s.status === "running" || s.status === "paused",
+    );
+    if (!running || !(running.tags || []).includes("pomodoro")) return null;
+    return running.type === "work" ? "work" : "break";
+  });
+  // eslint-disable-next-line no-unused-vars
+  const [pomodoroTarget, setPomodoroTarget] = useState(() => {
+    const phase = (() => {
+      const timerMode = initialData?.ui?.timerMode;
+      if (timerMode !== "pomodoro") return null;
+      const running = (initialData?.sessions || []).find(
+        (s) => s.status === "running" || s.status === "paused",
+      );
+      if (!running || !(running.tags || []).includes("pomodoro")) return null;
+      return running.type === "work" ? "work" : "break";
+    })();
+    if (phase === null) return null;
+    const settings = initialData?.settings?.pomodoro;
+    const interval = phase === "work"
+      ? (settings?.workInterval ?? 25)
+      : (settings?.breakInterval ?? 5);
+    return interval * 60000;
+  });
+  // eslint-disable-next-line no-unused-vars
+  const [graceEnd, setGraceEnd] = useState(null);
+  const pomodoroTargetRef = useRef(pomodoroTarget);
+  const pomodoroPhaseRef = useRef(pomodoroPhase);
+  // Keep refs in sync via effect (avoids writing during render)
+  useEffect(() => { pomodoroTargetRef.current = pomodoroTarget; }, [pomodoroTarget]);
+  useEffect(() => { pomodoroPhaseRef.current = pomodoroPhase; }, [pomodoroPhase]);
+
+  // Custom elapsed for pomodoro: work-time only, ignores current pause
+  // eslint-disable-next-line no-unused-vars
+  const pomodoroElapsed = useMemo(() => {
+    if (!activeSession || pomodoroPhase !== "work") return elapsed;
+    if (activeSession.status !== "paused") return elapsed;
+    // Paused: compute work time up to the moment the pause started
+    const pauses = activeSession.pauses || [];
+    const completedPauseTime = pauses
+      .filter((p) => p.end !== null)
+      .reduce((sum, p) => sum + (p.end - p.start), 0);
+    const lastPause = pauses[pauses.length - 1];
+    const effectiveNow = lastPause ? lastPause.start : activeSession.start;
+    return Math.max(0, effectiveNow - activeSession.start - completedPauseTime);
+  }, [activeSession, elapsed, pomodoroPhase]);
+
   // Wire module-level save hooks
   // eslint-disable-next-line react-hooks/immutability
   _onQuotaExceeded.current = setQuotaWarning;
