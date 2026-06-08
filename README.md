@@ -11,7 +11,7 @@ Developer-first time tracking. 100% local. Git-native.
 [![Cloud Dependencies](https://img.shields.io/badge/Cloud_Dependencies-0-44cc11?style=flat-square&labelColor=1c1917)]()
 [![Telemetry](https://img.shields.io/badge/Telemetry-0_bytes-44cc11?style=flat-square&labelColor=1c1917)]()
 
-[Features](#-features) · [Getting Started](#-getting-started) · [Architecture](#-architecture) · [Full Docs](docs/FEATURES.md)
+[Features](#-features) · [Getting Started](#-getting-started) · [Docker](#-docker) · [Architecture](#-architecture) · [Full Docs](docs/FEATURES.md)
 
 </div>
 
@@ -35,7 +35,7 @@ Your data belongs on your machine — no cloud, no accounts, no telemetry. Git a
 | **Telemetry** | 0 bytes | Analytics | Analytics | Optional | Optional |
 | **Excel export** | 6 styled sheets | CSV (paid) | CSV/PDF (paid) | JSON | Basic |
 | **Works offline** | Yes | No | No | Yes | Yes |
-| **Setup** | `npm run dev` | Sign up + plugin | Sign up + plugin | Desktop install | Desktop install |
+| **Setup** | `npm run dev` or `docker compose up` | Sign up + plugin | Sign up + plugin | Desktop install | Desktop install |
 | **Price** | Free | $10+/mo | $0-$18/mo | Free | Free |
 
 DevTrack has no mobile app, no team features, and no browser extension. That is by design — it does one thing well.
@@ -78,6 +78,18 @@ npm run dev
 
 Open [http://localhost:9000](http://localhost:9000) — the app is ready to use.
 
+### Docker (Alternative)
+
+No Node.js required — run with Docker instead:
+
+```bash
+git clone https://github.com/nexiouscaliver/devtrack.git
+cd devtrack
+docker compose up -d
+```
+
+Open [http://localhost:9000](http://localhost:9000). See the [Docker](#-docker) section for configuration, data persistence, and git integration.
+
 ### Commands
 
 | Command | Description |
@@ -93,6 +105,8 @@ Open [http://localhost:9000](http://localhost:9000) — the app is ready to use.
 ---
 
 ## Architecture
+
+**Development mode** — Vite serves the frontend with HMR and proxies API requests to the companion server:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -132,13 +146,91 @@ Open [http://localhost:9000](http://localhost:9000) — the app is ready to use.
 └─────────────────────────────────────────────────────────┘
 ```
 
+**Production (Docker)** — Express serves both the built frontend and API from a single port:
+
+```
+Browser → Express (port 9000)
+            ├── serves dist/ as static files
+            ├── handles /api/* endpoints directly
+            ├── git operations against mounted repos (read-only)
+            └── SPA fallback: non-API GET → index.html
+```
+
 | Principle | Implementation |
 |-----------|---------------|
-| **Zero cloud dependency** | All data stored locally — localStorage + local disk |
+| **Zero cloud dependency** | All data stored locally — localStorage + local disk (or Docker volume) |
 | **Privacy-first** | No telemetry, no accounts, no remote APIs |
 | **Dual reliability** | Browser + server persistence with sync engine |
 | **Atomic operations** | tmp+rename writes, write mutex, debounced saves |
 | **Graceful degradation** | Works offline; syncs when server available |
+| **Containerized deployment** | Multi-stage Docker build, non-root runtime, one-command setup |
+
+---
+
+## Docker
+
+Run DevTrack with Docker — no Node.js or npm required.
+
+```bash
+# Build and start
+docker compose up -d
+
+# Open http://localhost:9000
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `docker compose up -d` | Start in background |
+| `docker compose down` | Stop and remove container |
+| `docker compose logs -f` | View live logs |
+| `docker compose restart` | Restart the container |
+
+### Standalone Docker
+
+```bash
+docker build -t devtrack .
+docker run -d \
+  --name devtrack \
+  -p 9000:9000 \
+  -v ./devtrack-data:/app/server/data \
+  --restart unless-stopped \
+  devtrack
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEVTRACK_PORT` | `9000` | Host port (set via `.env` file or environment) |
+| `BIND_ADDR` | `0.0.0.0` | Server bind address inside container |
+
+To use a custom host port, create a `.env` file in the project root:
+
+```
+DEVTRACK_PORT=8080
+```
+
+### Data
+
+Your data is stored in `./devtrack-data/` on the host, mapped to `/app/server/data` in the container. This includes sessions, settings, and version snapshots. The directory is created automatically on first run.
+
+### Git Integration
+
+To track git repositories, mount them as volumes in `docker-compose.yml`:
+
+```yaml
+volumes:
+  - ./devtrack-data:/app/server/data
+  - /path/to/your/repo:/repos/your-repo:ro   # add your repos
+```
+
+Then use the **container path** (`/repos/your-repo`) in the DevTrack UI instead of the host path.
+
+### Security
+
+> **Note:** The Docker container binds to `0.0.0.0`, making DevTrack accessible on your local network. DevTrack has no authentication. Only run on trusted networks, or use `--network=host -e BIND_ADDR=127.0.0.1` for localhost-only access.
 
 ---
 
@@ -149,7 +241,7 @@ DevTrack takes security seriously even though it runs entirely locally:
 - **Path traversal prevention** — all paths validated, `..` sequences rejected
 - **Shell escaping** — `shEscape()` wraps all git command arguments
 - **Read-only git operations** — no push, pull, checkout, or mutating git commands
-- **No remote access** — server binds to `127.0.0.1` only
+- **No remote access** — server binds to `127.0.0.1` only (in development mode)
 - **Size limits** — 5MB request limit, 10,000 item array caps
 - **Private note filtering** — private content excluded from all exports
 
@@ -199,6 +291,9 @@ None of this requires configuration. It all works out of the box.
 ```
 devtrack/
 ├── index.html                  # Entry point
+├── Dockerfile                  # Multi-stage build (builder + runtime)
+├── docker-compose.yml          # One-command deployment with health check
+├── .dockerignore               # Excludes build artifacts from context
 ├── src/
 │   ├── main.jsx                # React root mount
 │   ├── App.jsx                 # Full application (~6,000 lines)
@@ -207,7 +302,7 @@ devtrack/
 │       ├── syncEngine.test.js  # Test suite
 │       └── exportEngine.js     # Excel/CSV generation (~1,250 lines)
 ├── server/
-│   ├── git-server.mjs          # Express companion server (~600 lines)
+│   ├── git-server.mjs          # Express companion server (~630 lines)
 │   └── data/                   # Persisted data (gitignored)
 ├── docs/
 │   ├── FEATURES.md             # Detailed feature reference
@@ -229,7 +324,7 @@ Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and code
 - [ ] Keyboard shortcuts for timer controls
 - [ ] Calendar view for session visualization
 - [ ] Browser extension for external tool tracking
-- [ ] Docker compose for one-command deployment
+- [x] Docker compose for one-command deployment
 
 ---
 

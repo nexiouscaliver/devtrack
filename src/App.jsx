@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LineChart,
@@ -243,6 +243,7 @@ const ICONS = {
   ),
   chevronDown: <polyline points="6 9 12 15 18 9" />,
   chevronRight: <polyline points="9 18 15 12 9 6" />,
+  chevronLeft: <polyline points="15 18 9 12 15 6" />,
   flag: (
     <>
       <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
@@ -263,6 +264,26 @@ const ICONS = {
     </>
   ),
 };
+
+// Calendar intensity helpers (module scope — no closure over component state)
+const CALENDAR_INTENSITY_CLASSES = {
+  peak: "bg-amber-500/50",
+  intense: "bg-amber-600/50",
+  strong: "bg-amber-700/50",
+  medium: "bg-amber-800/50",
+  light: "bg-amber-900/40",
+  none: "bg-stone-800/30",
+};
+const getCalendarIntensity = (totalWorkMs) => {
+  const hours = (totalWorkMs || 0) / 3600000;
+  if (hours >= 8) return "peak";
+  if (hours >= 6) return "intense";
+  if (hours >= 4) return "strong";
+  if (hours >= 2) return "medium";
+  if (hours > 0)  return "light";
+  return "none";
+};
+const formatCalendarHours = (ms) => (ms / 3600000).toFixed(1) + "h";
 
 // Helpers
 const formatDuration = (ms) => {
@@ -840,6 +861,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [quotaWarning, setQuotaWarning] = useState(false);
   const [serverStatus, setServerStatus] = useState("connected"); // connected | disconnected
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const serverStatusRef = useRef("connected");
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef(null);
@@ -1017,6 +1039,30 @@ export default function App() {
   const dataRef = useRef(data);
   // eslint-disable-next-line react-hooks/immutability
   useEffect(() => { dataRef.current = data; }, [data]);
+
+  // Refs for keyboard listener — read current state without re-registering the listener
+  const activeSessionRef = useRef(activeSession);
+  useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
+
+  const settingsOpenRef = useRef(settingsOpen);
+  useEffect(() => { settingsOpenRef.current = settingsOpen; }, [settingsOpen]);
+
+  const syncOpenRef = useRef(syncOpen);
+  useEffect(() => { syncOpenRef.current = syncOpen; }, [syncOpen]);
+
+  const mobileMenuOpenRef = useRef(mobileMenuOpen);
+  useEffect(() => { mobileMenuOpenRef.current = mobileMenuOpen; }, [mobileMenuOpen]);
+
+  const shortcutHelpOpenRef = useRef(shortcutHelpOpen);
+  useEffect(() => { shortcutHelpOpenRef.current = shortcutHelpOpen; }, [shortcutHelpOpen]);
+
+  // Function refs for keyboard listener — initialized null, synced after declarations
+  const startSessionRef = useRef(null);
+  const pauseSessionRef = useRef(null);
+  const resumeSessionRef = useRef(null);
+  const stopSessionRef = useRef(null);
+  const changeViewRef = useRef(null);
+
   useEffect(() => {
     if (serverSynced.current) return;
     serverSynced.current = true;
@@ -1166,6 +1212,70 @@ export default function App() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSession?.id, activeSession?.status]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    // Navigation view IDs — must match the `nav` array in App()
+    const navIds = ["dashboard", "timer", "sessions", "git", "analytics", "worklog", "export"];
+
+    const handleKeyDown = (e) => {
+      // Guard: suppress shortcuts when typing in input fields
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
+
+      // Escape: close topmost modal/overlay (priority order)
+      if (e.key === "Escape") {
+        if (shortcutHelpOpenRef.current) {
+          setShortcutHelpOpen(false);
+          e.preventDefault();
+        } else if (settingsOpenRef.current) {
+          setSettingsOpen(false);
+          e.preventDefault();
+        } else if (syncOpenRef.current) {
+          setSyncOpen(false);
+          e.preventDefault();
+        } else if (mobileMenuOpenRef.current) {
+          setMobileMenuOpen(false);
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // Alt+key shortcuts
+      if (!e.altKey) return;
+
+      if (e.key === "s" || e.key === "S") {
+        if (startSessionRef.current) startSessionRef.current("work");
+        e.preventDefault();
+      } else if (e.key === "p" || e.key === "P") {
+        const session = activeSessionRef.current;
+        if (session && (session.status === "running" || session.status === "paused")) {
+          if (session.status === "running") {
+            if (pauseSessionRef.current) pauseSessionRef.current();
+          } else {
+            if (resumeSessionRef.current) resumeSessionRef.current();
+          }
+          e.preventDefault();
+        }
+      } else if (e.key === "x" || e.key === "X") {
+        const session = activeSessionRef.current;
+        if (session && (session.status === "running" || session.status === "paused")) {
+          if (stopSessionRef.current) stopSessionRef.current();
+          e.preventDefault();
+        }
+      } else if (e.key >= "1" && e.key <= "7") {
+        const viewIndex = parseInt(e.key, 10) - 1;
+        if (changeViewRef.current) changeViewRef.current(navIds[viewIndex]);
+        e.preventDefault();
+      } else if (e.key === "/") {
+        setShortcutHelpOpen((v) => !v);
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const toastTimer = useRef(null);
 
@@ -1703,6 +1813,13 @@ export default function App() {
     });
   }, [showToast]);
 
+  // Sync function refs for keyboard listener (declared above, populated now)
+  useEffect(() => { startSessionRef.current = startSession; }, [startSession]);
+  useEffect(() => { pauseSessionRef.current = pauseSession; }, [pauseSession]);
+  useEffect(() => { resumeSessionRef.current = resumeSession; }, [resumeSession]);
+  useEffect(() => { stopSessionRef.current = stopSession; }, [stopSession]);
+  useEffect(() => { changeViewRef.current = changeView; }, [changeView]);
+
   const deleteSession = (id) => {
     setData((d) => ({ ...d, sessions: d.sessions.filter((s) => s.id !== id) }));
     showToast("Session deleted");
@@ -2007,6 +2124,7 @@ export default function App() {
     { id: "dashboard", label: "Dashboard", icon: ICONS.dashboard },
     { id: "timer", label: "Timer", icon: ICONS.timer },
     { id: "sessions", label: "Sessions", icon: ICONS.list },
+    { id: "calendar", label: "Calendar", icon: ICONS.calendar },
     { id: "git", label: "Git Tracking", icon: ICONS.github },
     { id: "analytics", label: "Analytics", icon: ICONS.chart },
     { id: "worklog", label: "Work Log", icon: ICONS.flag },
@@ -2266,6 +2384,14 @@ export default function App() {
                 fetchFullData={fetchFullData}
               />
             )}
+            {view === "calendar" && (
+              <CalendarView
+                data={data}
+                activeSession={activeSession}
+                elapsed={elapsed}
+                now={now}
+              />
+            )}
             {view === "worklog" && (
               <WorkLogView
                 data={data}
@@ -2313,6 +2439,10 @@ export default function App() {
         localData={data}
         applySyncResult={applySyncResult}
         showToast={showToast}
+      />
+      <ShortcutHelpOverlay
+        open={shortcutHelpOpen}
+        onClose={() => setShortcutHelpOpen(false)}
       />
       <Toast toast={toast} />
 
@@ -4599,6 +4729,358 @@ function AnalyticsView({ data, gitEstimatedSessions, initialRange, onRangeChange
   );
 }
 
+// ============ CALENDAR VIEW ============
+function CalendarView({ data, activeSession, elapsed, now }) {
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [direction, setDirection] = useState(0);
+
+  const { year, month } = currentMonth;
+
+  // Month navigation
+  const goToPrevMonth = () => {
+    setDirection(-1);
+    setCurrentMonth(prev => {
+      const m = prev.month === 0 ? 11 : prev.month - 1;
+      const y = prev.month === 0 ? prev.year - 1 : prev.year;
+      return { year: y, month: m };
+    });
+    setSelectedDay(null);
+  };
+  const goToNextMonth = () => {
+    setDirection(1);
+    setCurrentMonth(prev => {
+      const m = prev.month === 11 ? 0 : prev.month + 1;
+      const y = prev.month === 11 ? prev.year + 1 : prev.year;
+      return { year: y, month: m };
+    });
+    setSelectedDay(null);
+  };
+  const goToToday = () => {
+    const d = new Date();
+    setDirection(0);
+    setCurrentMonth({ year: d.getFullYear(), month: d.getMonth() });
+    setSelectedDay(startOfDay(Date.now()));
+  };
+
+  const viewingCurrentMonth = year === new Date(now).getFullYear()
+    && month === new Date(now).getMonth();
+
+  const monthLabel = new Date(year, month).toLocaleDateString("en", { month: "long", year: "numeric" });
+
+  // Grid computation
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
+  const totalRows = totalCells / 7;
+
+  // Sessions aggregated by day — completed sessions only (stable memo, no elapsed dependency)
+  const sessionsByDay = useMemo(() => {
+    const map = {};
+    const gridStart = startOfDay(new Date(year, month, 1 - firstDay).getTime());
+    const gridEnd = gridStart + totalCells * 86400000;
+
+    data.sessions
+      .filter(s => s.status === "completed")
+      .forEach(s => {
+        const day = startOfDay(s.start);
+        if (day >= gridStart && day < gridEnd) {
+          if (!map[day]) map[day] = { sessions: [], totalWork: 0 };
+          map[day].sessions.push(s);
+          if (s.type === "work") {
+            map[day].totalWork += (s.totalWorkTime || s.duration);
+          }
+        }
+      });
+
+    return map;
+  }, [data.sessions, year, month, firstDay, totalCells]);
+
+  // Live running session overlay — cheap inline computation (not memoized)
+  const todayKey = startOfDay(now);
+  const hasActiveToday = activeSession
+    && (activeSession.status === "running" || activeSession.status === "paused")
+    && startOfDay(activeSession.start) === todayKey
+    && new Date(todayKey).getMonth() === month
+    && new Date(todayKey).getFullYear() === year;
+  const todayLiveWork = hasActiveToday && activeSession.type === "work"
+    ? (sessionsByDay[todayKey]?.totalWork || 0) + elapsed
+    : (sessionsByDay[todayKey]?.totalWork || 0);
+
+  const getRowForDay = (dayTs) => {
+    const dayDate = new Date(dayTs);
+    if (dayDate.getMonth() !== month || dayDate.getFullYear() !== year) return -1;
+    const cellIndex = firstDay + dayDate.getDate() - 1;
+    return Math.floor(cellIndex / 7);
+  };
+
+  // Keyboard handler for day cells
+  const handleDayKeyDown = (e, dayTs) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setSelectedDay(prev => prev === dayTs ? null : dayTs);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setSelectedDay(null);
+    }
+  };
+
+  // Global escape listener to collapse panel
+  useEffect(() => {
+    if (selectedDay === null) return;
+    const handler = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSelectedDay(null);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [selectedDay]);
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-6">
+      {/* Header */}
+      <div>
+        <h2 className="text-2xl font-bold">Calendar</h2>
+        <p className="text-stone-400">Your tracked time at a glance</p>
+      </div>
+
+      {/* Month navigation */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={goToPrevMonth}
+            className="p-2 rounded-lg hover:bg-stone-800 text-stone-400 hover:text-white transition-colors"
+            aria-label="Previous month"
+          >
+            <Icon path={ICONS.chevronLeft} size={20} />
+          </button>
+          <h3 className="text-lg font-semibold min-w-[180px] text-center">{monthLabel}</h3>
+          <button
+            onClick={goToNextMonth}
+            className="p-2 rounded-lg hover:bg-stone-800 text-stone-400 hover:text-white transition-colors"
+            aria-label="Next month"
+          >
+            <Icon path={ICONS.chevronRight} size={20} />
+          </button>
+        </div>
+        <button
+          onClick={goToToday}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            viewingCurrentMonth
+              ? "bg-stone-800 text-stone-500 cursor-default"
+              : "bg-stone-800 text-stone-300 hover:bg-stone-700 hover:text-white"
+          }`}
+          disabled={viewingCurrentMonth}
+        >
+          Today
+        </button>
+      </div>
+
+      {/* Calendar grid */}
+      <div className="bg-stone-800/50 backdrop-blur-sm border border-stone-700/50 rounded-xl p-2 md:p-4 overflow-visible">
+        {/* Day-of-week headers */}
+        <div className="grid grid-cols-7 mb-1">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
+            <div key={d} className="text-center text-xs text-stone-500 py-1 md:py-2 font-medium">{d}</div>
+          ))}
+        </div>
+
+        {/* Day grid with AnimatePresence for month transitions */}
+        <AnimatePresence mode="wait" custom={direction}>
+          <motion.div
+            key={`${year}-${month}`}
+            custom={direction}
+            initial={{ opacity: 0, x: direction * 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -direction * 30 }}
+            transition={{ duration: 0.2 }}
+            className="grid grid-cols-7 gap-1"
+          >
+            {Array.from({ length: totalRows }, (_, rowIdx) => {
+              const isRowWithSelected = selectedDay !== null && getRowForDay(selectedDay) === rowIdx;
+
+              return (
+                <Fragment key={rowIdx}>
+                  {Array.from({ length: 7 }, (_, colIdx) => {
+                    const cellIndex = rowIdx * 7 + colIdx;
+                    const dayNum = cellIndex - firstDay + 1;
+                    const isInMonth = dayNum >= 1 && dayNum <= daysInMonth;
+
+                    if (!isInMonth) {
+                      return (
+                        <div
+                          key={cellIndex}
+                          className="aspect-square rounded-lg bg-stone-900/20"
+                        />
+                      );
+                    }
+
+                    const dayTs = startOfDay(new Date(year, month, dayNum).getTime());
+                    const dayData = sessionsByDay[dayTs];
+                    const isTodayCell = isToday(dayTs);
+                    const dayTotalWork = isTodayCell ? todayLiveWork : (dayData?.totalWork || 0);
+                    const intensity = getCalendarIntensity(dayTotalWork);
+                    const isSelected = selectedDay === dayTs;
+                    const hasActiveSession = activeSession && isTodayCell && (activeSession.status === "running" || activeSession.status === "paused");
+
+                    return (
+                      <div
+                        key={cellIndex}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${new Date(dayTs).toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" })}${dayTotalWork > 0 ? `, ${formatCalendarHours(dayTotalWork)} work` : ""}`}
+                        aria-expanded={isSelected}
+                        className={`group relative aspect-square rounded-lg p-1 md:p-2 cursor-pointer transition-all ${CALENDAR_INTENSITY_CLASSES[intensity]} hover:ring-1 hover:ring-amber-400/50 focus:outline-none focus:ring-2 focus:ring-amber-400/70 ${
+                          isTodayCell && !isSelected ? "ring-2 ring-amber-400 ring-offset-1 ring-offset-stone-950" : ""
+                        } ${
+                          isSelected ? "ring-2 ring-amber-300 ring-offset-1 ring-offset-stone-950" : ""
+                        }`}
+                        onClick={() => setSelectedDay(prev => prev === dayTs ? null : dayTs)}
+                        onKeyDown={(e) => handleDayKeyDown(e, dayTs)}
+                      >
+                        <div className="flex items-start justify-between">
+                          <span className={`text-xs md:text-sm font-medium ${
+                            isInMonth ? "text-stone-200" : "text-stone-600"
+                          } ${intensity === "none" && !isTodayCell ? "text-stone-500" : ""}`}>
+                            {dayNum}
+                          </span>
+                          {hasActiveSession && (
+                            <span className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-emerald-400 animate-pulse" />
+                          )}
+                        </div>
+
+                        {/* Hover tooltip */}
+                        {dayTotalWork > 0 && (
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-stone-900 border border-stone-700 rounded-lg text-xs text-stone-300 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none shadow-lg">
+                            <div className="font-medium">{formatCalendarHours(dayTotalWork)} work</div>
+                            <div className="text-stone-500">{(dayData?.sessions?.length || 0) + (hasActiveSession ? 1 : 0)} session{(dayData?.sessions?.length || 0) + (hasActiveSession ? 1 : 0) !== 1 ? "s" : ""}</div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Expanded panel for this row */}
+                  <AnimatePresence>
+                    {selectedDay !== null && isRowWithSelected && (
+                      <motion.div
+                        className="col-span-7"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.25, ease: "easeInOut" }}
+                        style={{ overflow: "hidden" }}
+                      >
+                        <CalendarDayDetail
+                          dayTs={selectedDay}
+                          sessions={sessionsByDay[selectedDay]?.sessions || []}
+                          activeSession={activeSession}
+                          elapsed={elapsed}
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </Fragment>
+              );
+            })}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+function CalendarDayDetail({ dayTs, sessions, activeSession, elapsed }) {
+  const dateLabel = new Date(dayTs).toLocaleDateString("en", { weekday: "long", month: "long", day: "numeric" });
+  const isTodaySelected = isToday(dayTs);
+
+  // Merge active session into list if it's today
+  const allSessions = [...sessions];
+  const hasActiveMerge = activeSession && isTodaySelected && (activeSession.status === "running" || activeSession.status === "paused");
+  if (hasActiveMerge) {
+    const alreadyIncluded = sessions.some(s => s.id === activeSession.id);
+    if (!alreadyIncluded) {
+      allSessions.push({ ...activeSession, duration: elapsed });
+    }
+  }
+
+  const totalWork = allSessions
+    .filter(s => s.type === "work")
+    .reduce((a, s) => {
+      if (activeSession && s.id === activeSession.id) return a + (s.status === "paused" ? (s.totalWorkTime || elapsed) : elapsed);
+      return a + (s.totalWorkTime || s.duration || 0);
+    }, 0);
+
+  const sortedSessions = [...allSessions].sort((a, b) => a.start - b.start);
+
+  return (
+    <div className="mt-1 mb-2 p-3 md:p-4 bg-stone-900/80 border border-stone-700/50 rounded-xl">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h4 className="font-semibold text-sm">
+            {dateLabel}
+            {isTodaySelected && <span className="text-amber-400 ml-2 text-xs">Today</span>}
+          </h4>
+          {totalWork > 0 && (
+            <p className="text-xs text-stone-400 mt-0.5">
+              {(totalWork / 3600000).toFixed(1)}h work · {allSessions.length} session{allSessions.length !== 1 ? "s" : ""}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {sortedSessions.length === 0 ? (
+        <p className="text-stone-500 text-sm text-center py-4">No sessions tracked on this day</p>
+      ) : (
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {sortedSessions.map(s => {
+            const isRunning = activeSession && s.id === activeSession.id && (s.status === "running" || s.status === "paused");
+            const duration = isRunning ? elapsed : (s.duration || 0);
+            return (
+              <div key={s.id} className="flex items-center gap-3 p-2 rounded-lg bg-stone-800/50 hover:bg-stone-800 transition-colors">
+                <div className={`w-1 self-stretch rounded flex-shrink-0 ${s.type === "work" ? "bg-amber-400" : "bg-sky-400"}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium truncate">
+                      {s.notes || (s.type === "work" ? "Work session" : "Break")}
+                    </span>
+                    {isRunning && (
+                      <span className={`text-[10px] font-medium uppercase px-1.5 py-0.5 rounded ${
+                        s.status === "paused" ? "bg-sky-500/20 text-sky-400" : "bg-emerald-500/20 text-emerald-400 animate-pulse"
+                      }`}>
+                        {s.status}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-stone-400">
+                    <span>{formatTime(s.start)} – {s.end ? formatTime(s.end) : "now"}</span>
+                    <span>·</span>
+                    <span>{formatDuration(duration)}</span>
+                  </div>
+                  {(s.tags || []).length > 0 && (
+                    <div className="flex gap-1 mt-1 flex-wrap">
+                      {s.tags.map((t, i) => (
+                        <span key={i} className="text-[10px] px-1.5 py-0.5 bg-stone-700/50 rounded text-stone-400">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ EXPORT VIEW ============
 function ExportView({ data, gitAuthors, showToast, initialPeriod, initialFormat, onPrefsChange, updateUi, fetchFullData }) {
   const [period, setPeriod] = useState(initialPeriod || "week");
@@ -5331,16 +5813,6 @@ function SettingsModal({ open, onClose, data, updateSettings, showToast, onReset
   const [newIdentityName, setNewIdentityName] = useState("");
   const [newIdentityEmail, setNewIdentityEmail] = useState("");
 
-  // Sync form when modal opens and handle Escape key
-  useEffect(() => {
-    if (!open) return;
-    const handleKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [open, onClose]);
-
   if (!open) return null;
 
   const gitAuthors = form.gitAuthors || { identities: [], autoDetected: null };
@@ -5651,6 +6123,90 @@ function SettingsModal({ open, onClose, data, updateSettings, showToast, onReset
   );
 }
 
+// ============ KEYBOARD SHORTCUT HELP OVERLAY ============
+function ShortcutHelpOverlay({ open, onClose }) {
+  const sections = [
+    {
+      title: "Timer",
+      shortcuts: [
+        { keys: "Alt+S", desc: "Start work session" },
+        { keys: "Alt+P", desc: "Pause / Resume" },
+        { keys: "Alt+X", desc: "Stop session" },
+      ],
+    },
+    {
+      title: "Navigation",
+      shortcuts: [
+        { keys: "Alt+1", desc: "Dashboard" },
+        { keys: "Alt+2", desc: "Timer" },
+        { keys: "Alt+3", desc: "Sessions" },
+        { keys: "Alt+4", desc: "Git Tracking" },
+        { keys: "Alt+5", desc: "Analytics" },
+        { keys: "Alt+6", desc: "Work Log" },
+        { keys: "Alt+7", desc: "Export" },
+      ],
+    },
+    {
+      title: "General",
+      shortcuts: [
+        { keys: "Alt+/", desc: "Toggle this help" },
+        { keys: "Esc", desc: "Close modal / overlay" },
+      ],
+    },
+  ];
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Keyboard Shortcuts"
+            className="bg-stone-900 border border-stone-800 rounded-2xl p-6 w-full max-w-md"
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold">Keyboard Shortcuts</h3>
+              <button onClick={onClose} className="text-stone-400 hover:text-white" aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <div className="space-y-5">
+              {sections.map((section) => (
+                <div key={section.title}>
+                  <h4 className="text-xs text-stone-400 uppercase tracking-wide mb-2">{section.title}</h4>
+                  <div className="space-y-1.5">
+                    {section.shortcuts.map((s) => (
+                      <div key={s.keys} className="flex items-center justify-between">
+                        <span className="text-sm text-stone-300">{s.desc}</span>
+                        <kbd className="px-2 py-1 bg-stone-800 border border-stone-700 rounded text-xs font-mono text-amber-400">
+                          {s.keys}
+                        </kbd>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 // ============ TOAST ============
 function Toast({ toast }) {
   return (
@@ -5691,16 +6247,6 @@ function SyncView({ open, onClose, localData, applySyncResult, showToast }) {
   const [expandedSections, setExpandedSections] = useState({});
   const [showVersions, setShowVersions] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(null);
-
-  // Escape key handler
-  useEffect(() => {
-    if (!open) return;
-    const handleKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [open, onClose]);
 
   // Kick off diff computation when modal opens
   useEffect(() => {
