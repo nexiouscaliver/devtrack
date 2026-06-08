@@ -42,10 +42,15 @@ Non-persisted state in `App()`:
 ```javascript
 const [pomodoroCycle, setPomodoroCycle] = useState(0);   // completed work intervals today
 const [pomodoroPhase, setPomodoroPhase] = useState(null); // null | "work" | "break" | "grace"
+const [pomodoroTarget, setPomodoroTarget] = useState(null); // ms, set when interval starts, null when idle
+const [graceEnd, setGraceEnd] = useState(null);           // timestamp when grace period ends, null when not in grace
 ```
 
-- `pomodoroCycle` resets when a new day is detected (same pattern as dashboard stats)
+- `pomodoroCycle` resets when a new day is detected (same pattern as dashboard stats). Derived on mount by counting today's completed work sessions: `data.sessions.filter(s => isToday(s.start) && s.status === "completed" && s.type === "work" && s.tags.includes("pomodoro")).length`
 - `pomodoroPhase` derived from active session when recovering from page refresh
+- `pomodoroTarget` set to `settings.pomodoro.workInterval * 60000` when work starts, `settings.pomodoro.breakInterval * 60000` when break starts. `extendWork` adds 5 min: `setPomodoroTarget(prev => prev + 5 * 60000)`. Reset to `null` when phase ends.
+- `graceEnd` is a timestamp (not a counter) — `Date.now() + 30000` when grace starts. `graceRemaining` prop passed to TimerView is derived: `Math.max(0, Math.ceil((graceEnd - Date.now()) / 1000))`. Uses the existing tick to decrement — no new interval needed.
+- `timerMode` persists independently of cycle state. Returning users see their last-selected mode. Does not reset on new day — users who prefer pomodoro mode expect it to persist.
 
 ### Session Model
 
@@ -81,10 +86,32 @@ When pomodoro is active, the timer ring shows countdown instead of elapsed:
 
 **Secondary line:** `Elapsed: HH:MM:SS` in `text-xs text-stone-500` below the ring
 
-**Progress ring:** Fills inward as time passes
+**Progress ring:** Fills from empty to full as the interval progresses (same direction as existing timer)
+- At 0% elapsed the ring is empty; at 100% it is full, indicating interval complete
 - Work intervals: amber gradient (existing `timerGrad`)
 - Break intervals: sky gradient (existing `timerBreakGrad`)
-- Calculation: `elapsed / targetDuration * circumference`
+- Calculation: `pomodoroElapsed / pomodoroTarget * circumference`
+
+**Important: Custom elapsed computation for pomodoro.** The existing `elapsed` state switches semantics when a session is paused (returns break time instead of work time). For pomodoro countdown, we must compute work time independently:
+
+```javascript
+// In timer tick or as a derived value:
+const pomodoroElapsed = useMemo(() => {
+  if (!activeSession || pomodoroPhase !== "work") return elapsed;
+  // Compute actual work time, ignoring any current pause
+  const pauses = (activeSession.pauses || []);
+  const completedPauseTime = pauses
+    .filter(p => p.end !== null)
+    .reduce((sum, p) => sum + (p.end - p.start), 0);
+  // If currently paused, use the pause start as the effective "now"
+  const effectiveNow = activeSession.status === "paused"
+    ? pauses[pauses.length - 1]?.start ?? Date.now()
+    : Date.now();
+  return Math.max(0, effectiveNow - activeSession.start - completedPauseTime);
+}, [activeSession, elapsed, pomodoroPhase]);
+```
+
+This ensures the countdown displays correct remaining work time even if the user pauses mid-interval.
 
 ### Pomodoro Counter
 
@@ -133,17 +160,30 @@ No new `setInterval`. The existing 1-second tick `useEffect` (line 1031) gains a
 
 ```javascript
 if (pomodoroPhase === "work" || pomodoroPhase === "break") {
-  const target = pomodoroPhase === "work"
-    ? data.settings.pomodoro.workInterval * 60000
-    : data.settings.pomodoro.breakInterval * 60000;
-
-  if (elapsed >= target) {
+  if (pomodoroElapsed >= pomodoroTarget) {
     handlePomodoroIntervalComplete();
   }
 }
 ```
 
+Uses `pomodoroElapsed` (custom computation, see Section 2) and `pomodoroTarget` (state hook, see Section 1) instead of the raw `elapsed` state.
+
 `handlePomodoroIntervalComplete()` is a new function in `App()` managing the phase transition.
+
+### Transition Mechanism — Avoiding React Batching Race Conditions
+
+**Critical:** Do NOT call `stopSession()` then `startSession()` in the same synchronous block. React batches `setData` calls, and `dataRef.current` may be stale between the two calls. Instead, use a single `transitionPomodoroPhase()` function that:
+
+1. Reads the current session from `activeSession` (via ref or updater pattern)
+2. Completes it inline with a single `setData` call (same pattern as `stopSession` but without triggering `stopSession`'s git sync or toast)
+3. Creates the new session and updates `activeSession`, `pomodoroPhase`, `pomodoroTarget` in the same batch
+4. Fires only the pomodoro-specific notification toast
+
+This function essentially merges the stop+start into one atomic state update. It does NOT call `stopSession()` or `startSession()` — it performs the equivalent logic directly, tailored for pomodoro transitions.
+
+For manual stops (user clicks "Stop"), the existing `stopSession()` is called normally — no changes to its behavior. But pomodoro auto-transitions use the dedicated `transitionPomodoroPhase()` function.
+
+**Toast suppression:** During pomodoro auto-transitions, `stopSession()` and `startSession()` are NOT called, so their default toasts ("Previous session auto-completed", "Work session started") do NOT fire. Only the pomodoro-specific toast fires (e.g. "🍅 Work interval complete!").
 
 ### Grace Period (30 seconds)
 
@@ -151,11 +191,13 @@ Triggered when a work interval completes and `autoStartBreak` is `true`:
 
 1. Toast: `"🍅 Work interval complete! Break in 30s..."`
 2. Browser notification + sound
-3. Timer displays 30-second grace countdown
-4. Two action buttons appear:
+3. Set `graceEnd = Date.now() + 30000`, `pomodoroPhase = "grace"`
+4. Timer displays grace countdown (derived from `graceEnd` via existing tick — no new interval)
+5. Two action buttons appear:
    - **"Start Break Now"** — immediately starts break session
    - **"Skip Break"** — skips break, shows prompt for next pomodoro
-5. After 30s with no action → auto-start break session
+6. Each tick checks: if `pomodoroPhase === "grace" && Date.now() >= graceEnd` → auto-start break
+7. After 30s with no action → auto-start break session via `transitionPomodoroPhase()`
 
 If `autoStartBreak` is `false`, the grace period is skipped entirely — user must manually click "Start Break".
 
@@ -165,9 +207,10 @@ When `App()` mounts with an active session and `ui.timerMode === "pomodoro"`:
 
 1. Check session tags for `"pomodoro"`
 2. Derive `pomodoroPhase` from session type (`"work"` or `"break"`)
-3. Calculate remaining time: `target - elapsed`
-4. Resume ticking — if elapsed already past target, immediately trigger `handlePomodoroIntervalComplete()`
-5. Re-derive `pomodoroCycle` by counting today's completed work sessions with `"pomodoro"` tag
+3. Set `pomodoroTarget` from settings: `workInterval * 60000` or `breakInterval * 60000`
+4. Calculate remaining time: `pomodoroTarget - pomodoroElapsed`
+5. Resume ticking — if `pomodoroElapsed` already past `pomodoroTarget`, immediately trigger `handlePomodoroIntervalComplete()`
+6. Re-derive `pomodoroCycle` by counting: `data.sessions.filter(s => isToday(s.start) && s.status === "completed" && s.type === "work" && s.tags.includes("pomodoro")).length`
 
 ### Manual Stop During Pomodoro
 
@@ -241,6 +284,7 @@ Fires when any pomodoro interval (work or break) completes:
 - 440Hz sine wave, 200ms duration, gentle fade-out
 - Generated via `AudioContext` on-the-fly
 - Only plays when browser notifications setting is enabled
+- Note: Sound is intentionally coupled to the notifications toggle for simplicity. A future iteration may decouple these into separate controls.
 
 ### Toast Strategy
 
@@ -250,7 +294,7 @@ One toast on interval complete, another when the next phase actually starts. No 
 
 ## 7. Dashboard
 
-No changes. The pomodoro counter lives in TimerView only (per design decision). Pomodoro sessions appear naturally in the Dashboard's Recent Activity list as regular sessions tagged `"pomodoro"`.
+No changes. The pomodoro counter lives in TimerView only (per design decision — research explored a Dashboard stat card but this was intentionally excluded to keep the feature focused on TimerView). Pomodoro sessions appear naturally in the Dashboard's Recent Activity list as regular sessions tagged `"pomodoro"`.
 
 ---
 
@@ -261,11 +305,12 @@ No changes. The pomodoro counter lives in TimerView only (per design decision). 
 pomodoroPhase,        // null | "work" | "break" | "grace"
 pomodoroCycle,        // number — completed work intervals today
 pomodoroTarget,       // current target duration in ms (or null)
+pomodoroElapsed,      // custom elapsed computation (work-time only, ignores current pause)
 timerMode,            // "free" | "pomodoro"
-graceRemaining,       // seconds remaining in grace period (or null)
-setTimerMode,         // (mode: "free" | "pomodoro") => void
+graceRemaining,       // seconds remaining in grace period (derived: Math.ceil((graceEnd - Date.now()) / 1000))
+setTimerMode,         // (mode: "free" | "pomodoro") => void — follows updateSettings pattern: setData(d => ({...d, ui: {...d.ui, timerMode: mode}}))
 skipBreak,            // () => void
-extendWork,           // () => void — adds 5 min to current target
+extendWork,           // () => void — setPomodoroTarget(prev => prev + 5 * 60000)
 ```
 
 ---
@@ -277,12 +322,14 @@ extendWork,           // () => void — adds 5 min to current target
 | Manual stop mid-work | Session completes. Phase resets. Mode stays pomodoro. |
 | Switch mode mid-session | Toggle hidden while session active. Must stop first. |
 | Page refresh mid-pomodoro | Recover phase from session type + "pomodoro" tag. Re-derive cycle count. If past target, trigger completion immediately. |
+| Page refresh during grace period | Grace period is lost. On reload, no active session exists. User sees "Start Pomodoro" button and must manually start the break or next work interval. Grace is only 30s — acceptable loss. |
 | Interval crosses midnight | Existing stale-session logic (line 759) auto-completes at midnight. Cycle resets next day. |
 | Repeated skip breaks | Each skip increments cycle counter. No forced breaks. |
 | Extend work multiple times | Each click adds 5 min to target. Countdown adjusts. |
 | Grace period + navigate away | Break auto-starts — logic in App() useEffect, not TimerView. |
 | Notification permission denied | Falls back to toast + sound. No errors. |
 | Pomodoro on, no session | Shows "Start Pomodoro" button. Mode toggle visible. |
+| Browser crash during phase transition | At most one interval of data may be lost. The 300ms debounced save means rapid transitions are batched. This matches existing session behavior. |
 
 ---
 
@@ -292,10 +339,10 @@ extendWork,           // () => void — adds 5 min to current target
 |------|--------|
 | `src/App.jsx` — `DEFAULT_DATA` (line 420) | Add `pomodoro` to settings, `timerMode` to ui |
 | `src/App.jsx` — `ICONS` (line 40) | Add `skipForward` icon |
-| `src/App.jsx` — `sanitizeData` (line 458) | Handle new pomodoro settings fields |
-| `src/App.jsx` — `App()` state (line 785) | Add `pomodoroCycle`, `pomodoroPhase`, `graceRemaining` hooks |
-| `src/App.jsx` — Timer tick (line 1031) | Add countdown check against pomodoro target |
-| `src/App.jsx` — New functions | `handlePomodoroIntervalComplete`, `skipBreak`, `extendWork`, `setTimerMode`, `playNotificationSound` |
+| `src/App.jsx` — `sanitizeData` (line 458) | Add pomodoro settings with explicit defaults: `pomodoro: { workInterval: data.settings?.pomodoro?.workInterval ?? 25, breakInterval: data.settings?.pomodoro?.breakInterval ?? 5, autoStartBreak: data.settings?.pomodoro?.autoStartBreak ?? true, notifications: data.settings?.pomodoro?.notifications ?? true }` |
+| `src/App.jsx` — `App()` state (line 785) | Add `pomodoroCycle`, `pomodoroPhase`, `pomodoroTarget`, `graceEnd` hooks |
+| `src/App.jsx` — Timer tick (line 1031) | Add countdown check using `pomodoroElapsed >= pomodoroTarget`, and grace period check `pomodoroPhase === "grace" && Date.now() >= graceEnd` |
+| `src/App.jsx` — New functions | `transitionPomodoroPhase` (atomic stop+start for auto-cycling), `handlePomodoroIntervalComplete`, `skipBreak`, `extendWork`, `setTimerMode` (follows `updateSettings` pattern via `setData`), `playNotificationSound` (Web Audio API beep) |
 | `src/App.jsx` — `TimerView` (line 2205) | Mode toggle, countdown display, pomodoro counter, skip/extend buttons, grace period UI |
 | `src/App.jsx` — `SettingsModal` (line 4719) | New Pomodoro settings section |
 | `src/App.jsx` — `Dashboard` props (line 1908) | No changes needed |
